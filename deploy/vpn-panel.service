@@ -1,0 +1,30 @@
+[Unit]
+Description=VPN Panel - Unified sing-box & xray management
+Documentation=https://github.com/soulripper13/vpn-panel
+After=network.target sing-box.service
+Wants=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/vpn-panel/backend
+ExecStart=/usr/bin/node src/index.js
+Restart=always
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vpn-panel
+
+# Security hardening
+NoNewPrivileges=false
+PrivateTmp=true
+
+# Environment
+Environment=NODE_ENV=production
+EnvironmentFile=-/opt/vpn-panel/.env
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+[Install]
+WantedBy=multi-user.target

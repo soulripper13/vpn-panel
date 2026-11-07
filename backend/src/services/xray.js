@@ -1,0 +1,324 @@
+/**
+ * services/xray.js
+ * Service manager for Xray core: process lifecycle, configuration generation,
+ * validation, and log retrieval.
+ */
+
+'use strict';
+
+const { exec, execSync, spawn } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+const util = require('util');
+const cfg = require('../config/app-config');
+const Inbound = require('../models/Inbound');
+const Client = require('../models/Client');
+const Settings = require('../models/Settings');
+const { generateXrayInbound } = require('../utils/config-generator');
+
+const execAsync = util.promisify(exec);
+
+class XrayService {
+  /**
+   * Get xray running status, PID, memory, and version
+   */
+  static async getStatus() {
+    let running = false;
+    let pid = null;
+    let uptime = null;
+    let memory = null;
+    let version = 'unknown';
+
+    // 1. Version check
+    try {
+      if (fs.existsSync(cfg.XRAY_BIN)) {
+        const vOut = execSync(`"${cfg.XRAY_BIN}" version`, { timeout: 3000 }).toString();
+        const match = vOut.match(/Xray\s+([\d\.]+)/i);
+        if (match) version = match[1];
+      }
+    } catch {
+      // ignore
+    }
+
+    // 2. Check systemctl status or running process
+    try {
+      const { stdout } = await execAsync(`systemctl is-active ${cfg.XRAY_SERVICE}`);
+      if (stdout.trim() === 'active') {
+        running = true;
+      }
+    } catch {
+      try {
+        const { stdout } = await execAsync(`pgrep -f "${cfg.XRAY_PROCESS_NAME}.*-c"`);
+        const lines = stdout.trim().split('\n').filter(Boolean);
+        if (lines.length > 0) {
+          running = true;
+          pid = parseInt(lines[0], 10);
+        }
+      } catch {
+        running = false;
+      }
+    }
+
+    if (running && !pid) {
+      try {
+        const { stdout } = await execAsync(`systemctl show ${cfg.XRAY_SERVICE} --property=MainPID`);
+        const match = stdout.match(/MainPID=(\d+)/);
+        if (match && match[1] !== '0') {
+          pid = parseInt(match[1], 10);
+        }
+      } catch {}
+    }
+
+    // 3. Process details
+    if (pid) {
+      try {
+        const { stdout } = await execAsync(`ps -p ${pid} -o etime=,rss=`);
+        const parts = stdout.trim().split(/\s+/);
+        if (parts.length >= 2) {
+          uptime = parts[0];
+          memory = Math.round(parseInt(parts[1], 10) / 1024) + ' MB';
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    return {
+      running,
+      pid,
+      uptime,
+      memory,
+      version,
+      service: cfg.XRAY_SERVICE,
+      configPath: cfg.XRAY_CONFIG,
+      binaryPath: cfg.XRAY_BIN,
+    };
+  }
+
+  /**
+   * Start xray service / process
+   */
+  static async start() {
+    const status = await XrayService.getStatus();
+    if (status.running) {
+      return { success: true, message: 'Xray is already running' };
+    }
+
+    // Try systemd unit if exists
+    try {
+      await execAsync(`systemctl start ${cfg.XRAY_SERVICE}`);
+      return { success: true, message: 'Xray systemd service started' };
+    } catch {
+      // Direct launch fallback
+      const binDir = path.dirname(cfg.XRAY_BIN);
+      const child = spawn(cfg.XRAY_BIN, ['-c', cfg.XRAY_CONFIG], {
+        cwd: binDir,
+        detached: true,
+        stdio: 'ignore',
+      });
+      child.unref();
+      return { success: true, message: 'Xray process launched' };
+    }
+  }
+
+  /**
+   * Stop xray service / process
+   */
+  static async stop() {
+    try {
+      await execAsync(`systemctl stop ${cfg.XRAY_SERVICE} 2>/dev/null || pkill -f "${cfg.XRAY_PROCESS_NAME}"`);
+      return { success: true, message: 'Xray stopped' };
+    } catch (err) {
+      // If already stopped, ignore error
+      return { success: true, message: 'Xray stopped' };
+    }
+  }
+
+  /**
+   * Restart xray
+   */
+  static async restart() {
+    await XrayService.stop();
+    await new Promise((r) => setTimeout(r, 600));
+    return await XrayService.start();
+  }
+
+  /**
+   * Read raw config from disk
+   */
+  static getConfig() {
+    try {
+      if (!fs.existsSync(cfg.XRAY_CONFIG)) {
+        return null;
+      }
+      const raw = fs.readFileSync(cfg.XRAY_CONFIG, 'utf8');
+      return JSON.parse(raw);
+    } catch (err) {
+      throw new Error(`Failed to read xray config: ${err.message}`);
+    }
+  }
+
+  /**
+   * Validate and write config to disk
+   */
+  static async writeConfig(configObject) {
+    const jsonStr = JSON.stringify(configObject, null, 2);
+    const tempPath = `${cfg.XRAY_CONFIG}.tmp`;
+
+    const dir = path.dirname(cfg.XRAY_CONFIG);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+
+    fs.writeFileSync(tempPath, jsonStr, 'utf8');
+
+    // Test with xray -test
+    try {
+      if (fs.existsSync(cfg.XRAY_BIN)) {
+        await execAsync(`"${cfg.XRAY_BIN}" -test -config "${tempPath}"`);
+      }
+    } catch (err) {
+      try { fs.unlinkSync(tempPath); } catch {}
+      throw new Error(`Xray config validation failed: ${err.stderr || err.message}`);
+    }
+
+    fs.renameSync(tempPath, cfg.XRAY_CONFIG);
+    return true;
+  }
+
+  /**
+   * Generate complete xray config.json from database inbounds and clients
+   */
+  static async generateAndApplyConfig() {
+    const inbounds = Inbound.findAll({ engine: 'xray' }).filter((i) => Boolean(i.enabled));
+    const xrayInbounds = [];
+
+    // Always include API inbound for stats / management
+    xrayInbounds.push({
+      listen: '127.0.0.1',
+      port: cfg.XRAY_API_PORT,
+      protocol: 'dokodemo-door',
+      settings: {
+        address: '127.0.0.1',
+      },
+      tag: 'api',
+    });
+
+    for (const inb of inbounds) {
+      const clients = Client.findByInbound(inb.id).filter((c) => Boolean(c.enable));
+      const settings = inb.settings || (typeof inb.settings_json === 'string' ? JSON.parse(inb.settings_json || '{}') : inb.settings_json) || {};
+      const streamSettings = inb.stream_settings || (typeof inb.stream_settings_json === 'string' ? JSON.parse(inb.stream_settings_json || '{}') : inb.stream_settings_json) || {};
+
+      const combinedOpts = {
+        ...settings,
+        ...streamSettings,
+        tag: inb.tag,
+        listen: inb.listen,
+        port: inb.port,
+        users: clients.map((c) => ({
+          email: c.email,
+          uuid: c.uuid,
+          password: c.password,
+          flow: c.flow,
+        })),
+      };
+
+      const generated = generateXrayInbound(inb.type, combinedOpts);
+      if (generated) {
+        xrayInbounds.push(generated);
+      }
+    }
+
+    const config = {
+      log: {
+        access: 'none',
+        dnsLog: false,
+        loglevel: 'warning',
+        maskAddress: '',
+      },
+      api: {
+        tag: 'api',
+        services: [
+          'HandlerService',
+          'LoggerService',
+          'StatsService',
+        ],
+      },
+      stats: {},
+      policy: {
+        levels: {
+          '0': {
+            statsUserUplink: true,
+            statsUserDownlink: true,
+          },
+        },
+        system: {
+          statsInboundUplink: true,
+          statsInboundDownlink: true,
+          statsOutboundUplink: true,
+          statsOutboundDownlink: true,
+        },
+      },
+      inbounds: xrayInbounds,
+      outbounds: [
+        {
+          tag: 'direct',
+          protocol: 'freedom',
+          settings: {},
+        },
+        {
+          tag: 'blocked',
+          protocol: 'blackhole',
+          settings: {},
+        },
+      ],
+      routing: {
+        domainStrategy: 'AsIs',
+        rules: [
+          {
+            type: 'field',
+            inboundTag: ['api'],
+            outboundTag: 'api',
+          },
+          {
+            type: 'field',
+            ip: ['geoip:private'],
+            outboundTag: 'blocked',
+          },
+        ],
+      },
+    };
+
+    await XrayService.writeConfig(config);
+    await XrayService.restart();
+    return config;
+  }
+
+  /**
+   * Get recent log lines
+   */
+  static async getLogs(lines = 100) {
+    try {
+      const { stdout } = await execAsync(`journalctl -u ${cfg.XRAY_SERVICE} -n ${lines} --no-pager 2>/dev/null || journalctl -u x-ui -n ${lines} --no-pager`);
+      return stdout;
+    } catch (err) {
+      return `Unable to fetch Xray logs: ${err.message}`;
+    }
+  }
+
+  /**
+   * Query traffic stats from Xray API
+   */
+  static async queryTraffic() {
+    try {
+      // Query stats via xray api cli with -reset to retrieve delta increments
+      const { stdout } = await execAsync(`"${cfg.XRAY_BIN}" api statsquery --server=127.0.0.1:${cfg.XRAY_API_PORT} -reset 2>/dev/null`);
+      const data = JSON.parse(stdout);
+      return data.stat || [];
+    } catch {
+      return [];
+    }
+  }
+}
+
+module.exports = XrayService;
