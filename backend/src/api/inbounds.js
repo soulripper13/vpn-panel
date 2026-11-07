@@ -19,6 +19,7 @@ const {
   generateClientLink,
   generateClashConfig,
   generateSingboxConfig,
+  generateHysteriaCliConfig,
   generateQRCode,
 } = require('../utils/link-generator');
 const { requireAuth } = require('../middleware/auth');
@@ -69,6 +70,7 @@ router.get('/', (req, res) => {
       link: generateClientLink(inb, c, host),
       clashYaml: generateClashConfig(inb, c, host),
       singboxJson: generateSingboxConfig(inb, c, host),
+      hy2Config: generateHysteriaCliConfig(inb, c, host),
     }));
 
     return {
@@ -134,6 +136,7 @@ router.get('/:id', (req, res) => {
     link: generateClientLink(inbound, c, host),
     clashYaml: generateClashConfig(inbound, c, host),
     singboxJson: generateSingboxConfig(inbound, c, host),
+    hy2Config: generateHysteriaCliConfig(inbound, c, host),
   }));
 
   return res.json({
@@ -338,6 +341,7 @@ router.get('/:id/clients', (req, res) => {
     link: generateClientLink(inbound, c, host),
     clashYaml: generateClashConfig(inbound, c, host),
     singboxJson: generateSingboxConfig(inbound, c, host),
+    hy2Config: generateHysteriaCliConfig(inbound, c, host),
   }));
 
   return res.json({
@@ -400,6 +404,7 @@ router.post('/:id/clients', async (req, res) => {
         link: generateClientLink(inbound, client, host),
         clashYaml: generateClashConfig(inbound, client, host),
         singboxJson: generateSingboxConfig(inbound, client, host),
+        hy2Config: generateHysteriaCliConfig(inbound, client, host),
       },
     });
   } catch (err) {

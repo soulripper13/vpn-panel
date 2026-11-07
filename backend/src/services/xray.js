@@ -138,9 +138,12 @@ class XrayService {
    * Restart xray
    */
   static async restart() {
-    await XrayService.stop();
-    await new Promise((r) => setTimeout(r, 600));
-    return await XrayService.start();
+    try {
+      await execAsync(`systemctl restart ${cfg.XRAY_SERVICE}`);
+      return { success: true, message: 'Xray service restarted' };
+    } catch (err) {
+      throw new Error(`Failed to restart xray: ${err.message}`);
+    }
   }
 
   /**
@@ -163,23 +166,23 @@ class XrayService {
    */
   static async writeConfig(configObject) {
     const jsonStr = JSON.stringify(configObject, null, 2);
-    const tempPath = `${cfg.XRAY_CONFIG}.tmp`;
-
     const dir = path.dirname(cfg.XRAY_CONFIG);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
+    const tempPath = path.join(dir, 'config.tmp.json');
 
     fs.writeFileSync(tempPath, jsonStr, 'utf8');
 
     // Test with xray -test
     try {
       if (fs.existsSync(cfg.XRAY_BIN)) {
-        await execAsync(`"${cfg.XRAY_BIN}" -test -config "${tempPath}"`);
+        await execAsync(`"${cfg.XRAY_BIN}" -test -format json -config "${tempPath}"`);
       }
     } catch (err) {
       try { fs.unlinkSync(tempPath); } catch {}
-      throw new Error(`Xray config validation failed: ${err.stderr || err.message}`);
+      const errMsg = err.stdout || err.stderr || err.message;
+      throw new Error(`Xray config validation failed: ${errMsg}`);
     }
 
     fs.renameSync(tempPath, cfg.XRAY_CONFIG);
@@ -212,13 +215,23 @@ class XrayService {
       const combinedOpts = {
         ...settings,
         ...streamSettings,
+        streamSettings,
+        stream_settings: streamSettings,
         tag: inb.tag,
         listen: inb.listen,
         port: inb.port,
+        clients: clients.map((c) => ({
+          email: c.email,
+          uuid: c.uuid,
+          password: c.password,
+          auth: c.password || c.uuid,
+          flow: c.flow,
+        })),
         users: clients.map((c) => ({
           email: c.email,
           uuid: c.uuid,
           password: c.password,
+          auth: c.password || c.uuid,
           flow: c.flow,
         })),
       };

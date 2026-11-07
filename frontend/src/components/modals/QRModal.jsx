@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
-import { X, Copy, Check, QrCode, FileText, Code2, Download } from 'lucide-react'
+import { X, Copy, Check, QrCode, FileText, Code2, Terminal } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
-import { generateClashYaml, generateSingboxJson } from '../../utils/links'
+import { generateClashYaml, generateSingboxJson, generateHysteriaCliConfig } from '../../utils/links'
 import toast from 'react-hot-toast'
 
 export default function QRModal({
@@ -14,7 +14,7 @@ export default function QRModal({
   inbound = null,
   client = null,
 }) {
-  const [activeTab, setActiveTab] = useState('qr') // 'qr' | 'clash' | 'singbox'
+  const [activeTab, setActiveTab] = useState('qr') // 'qr' | 'clash' | 'singbox' | 'hy2'
   const [copiedKey, setCopiedKey] = useState(null)
 
   if (!isOpen) return null
@@ -22,9 +22,12 @@ export default function QRModal({
   // Derive host from current location or window
   const host = window.location.hostname || '107.182.23.115'
 
+  const isHysteria = inbound?.type === 'hysteria' || inbound?.type === 'hysteria2' || inbound?.protocol === 'hysteria' || inbound?.protocol === 'hysteria2'
+
   // If YAML or JSON not provided directly, compute from inbound & client
   const finalClashYaml = clashYaml || (inbound ? generateClashYaml(inbound, client, host) : '')
   const finalSingboxJson = singboxJson || (inbound ? generateSingboxJson(inbound, client, host) : '')
+  const finalHy2Cli = inbound ? generateHysteriaCliConfig(inbound, client, host) : ''
 
   const handleCopy = (text, key) => {
     if (!text) return
@@ -54,11 +57,11 @@ export default function QRModal({
         </div>
 
         {/* Tabs */}
-        <div className="flex items-center space-x-1.5 p-1 bg-[#14161f] border border-[#2d3148] rounded-xl">
+        <div className="flex items-center space-x-1.5 p-1 bg-[#14161f] border border-[#2d3148] rounded-xl overflow-x-auto">
           <button
             type="button"
             onClick={() => setActiveTab('qr')}
-            className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-medium transition flex items-center justify-center space-x-1.5 ${
+            className={`flex-1 min-w-[100px] py-1.5 px-3 rounded-lg text-xs font-medium transition flex items-center justify-center space-x-1.5 ${
               activeTab === 'qr'
                 ? 'bg-indigo-600 text-white shadow-sm'
                 : 'text-slate-400 hover:text-slate-200'
@@ -71,7 +74,7 @@ export default function QRModal({
           <button
             type="button"
             onClick={() => setActiveTab('clash')}
-            className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-medium transition flex items-center justify-center space-x-1.5 ${
+            className={`flex-1 min-w-[110px] py-1.5 px-3 rounded-lg text-xs font-medium transition flex items-center justify-center space-x-1.5 ${
               activeTab === 'clash'
                 ? 'bg-indigo-600 text-white shadow-sm'
                 : 'text-slate-400 hover:text-slate-200'
@@ -84,7 +87,7 @@ export default function QRModal({
           <button
             type="button"
             onClick={() => setActiveTab('singbox')}
-            className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-medium transition flex items-center justify-center space-x-1.5 ${
+            className={`flex-1 min-w-[100px] py-1.5 px-3 rounded-lg text-xs font-medium transition flex items-center justify-center space-x-1.5 ${
               activeTab === 'singbox'
                 ? 'bg-indigo-600 text-white shadow-sm'
                 : 'text-slate-400 hover:text-slate-200'
@@ -93,6 +96,21 @@ export default function QRModal({
             <Code2 className="w-3.5 h-3.5" />
             <span>Sing-box JSON</span>
           </button>
+
+          {isHysteria && (
+            <button
+              type="button"
+              onClick={() => setActiveTab('hy2')}
+              className={`flex-1 min-w-[110px] py-1.5 px-3 rounded-lg text-xs font-medium transition flex items-center justify-center space-x-1.5 ${
+                activeTab === 'hy2'
+                  ? 'bg-amber-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Terminal className="w-3.5 h-3.5" />
+              <span>Official Hy2</span>
+            </button>
+          )}
         </div>
 
         {/* Body content based on active tab */}
@@ -116,7 +134,7 @@ export default function QRModal({
 
               {/* Share Link input + Copy button */}
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-slate-400">Connection URI (SIP002 / Standard)</label>
+                <label className="text-xs font-medium text-slate-400">Connection URI (SIP002 / Hysteria2 / Standard)</label>
                 <div className="flex items-center space-x-2">
                   <input
                     type="text"
@@ -140,7 +158,7 @@ export default function QRModal({
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs text-slate-400">
-                  Paste under <code className="text-indigo-300 font-mono">proxies:</code> in OpenClash / Clash Meta / Clash Verge:
+                  Paste under <code className="text-indigo-300 font-mono">proxies:</code> in OpenClash / Clash Meta / Mihomo:
                 </span>
                 <button
                   onClick={() => handleCopy(finalClashYaml, 'clash')}
@@ -174,6 +192,27 @@ export default function QRModal({
 
               <pre className="bg-[#14161f] border border-[#2d3148] rounded-xl p-4 text-xs font-mono text-purple-300 overflow-x-auto whitespace-pre selection:bg-purple-600 selection:text-white max-h-[320px]">
                 {finalSingboxJson || '{\n  "outbounds": []\n}'}
+              </pre>
+            </div>
+          )}
+
+          {activeTab === 'hy2' && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-slate-400">
+                  Official Hysteria 2 CLI / Daemon <code className="text-amber-300 font-mono">config.yaml</code>:
+                </span>
+                <button
+                  onClick={() => handleCopy(finalHy2Cli, 'hy2')}
+                  className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-medium transition flex items-center space-x-1.5 shadow"
+                >
+                  {copiedKey === 'hy2' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedKey === 'hy2' ? 'Copied' : 'Copy YAML'}</span>
+                </button>
+              </div>
+
+              <pre className="bg-[#14161f] border border-[#2d3148] rounded-xl p-4 text-xs font-mono text-amber-300 overflow-x-auto whitespace-pre selection:bg-amber-600 selection:text-white max-h-[320px]">
+                {finalHy2Cli}
               </pre>
             </div>
           )}

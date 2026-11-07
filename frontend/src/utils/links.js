@@ -53,6 +53,71 @@ export function extractSettings(inbound) {
 }
 
 /**
+ * Robust extractor for all anti-censorship parameters of Hysteria 2
+ */
+export function extractHysteriaDetails(inbound, settings, streamSettings, host) {
+  // 1. Obfs password (Salamander)
+  let obfsPassword = settings?.obfsPassword || streamSettings?.obfsPassword || ''
+  if (!obfsPassword && streamSettings?.finalmask?.udp) {
+    const salamander = streamSettings.finalmask.udp.find((u) => u.type === 'salamander')
+    if (salamander?.settings?.password) {
+      obfsPassword = salamander.settings.password
+    }
+  }
+  if (!obfsPassword && settings?.finalmask?.udp) {
+    const salamander = settings.finalmask.udp.find((u) => u.type === 'salamander')
+    if (salamander?.settings?.password) {
+      obfsPassword = salamander.settings.password
+    }
+  }
+
+  // 2. Port hopping range & hop interval
+  let ports = settings?.ports || streamSettings?.ports || settings?.udpHopPorts || streamSettings?.udpHopPorts || ''
+  let hopInterval = settings?.hopInterval || streamSettings?.hopInterval || 30
+  if (!ports && streamSettings?.finalmask?.quicParams?.udpHop?.ports) {
+    ports = streamSettings.finalmask.quicParams.udpHop.ports
+    hopInterval = streamSettings.finalmask.quicParams.udpHop.interval || 30
+  }
+  if (!ports && settings?.finalmask?.quicParams?.udpHop?.ports) {
+    ports = settings.finalmask.quicParams.udpHop.ports
+    hopInterval = settings.finalmask.quicParams.udpHop.interval || 30
+  }
+
+  // 3. SNI
+  let sni = streamSettings?.tlsSettings?.serverName ||
+            streamSettings?.serverName ||
+            settings?.serverName ||
+            settings?.sni ||
+            host ||
+            ''
+
+  // 4. ALPN
+  let alpn = streamSettings?.tlsSettings?.alpn || streamSettings?.alpn || ['h3']
+  if (Array.isArray(alpn)) alpn = alpn[0] || 'h3'
+
+  // 5. Insecure / Skip cert verify
+  const isIpSni = /^(\d{1,3}\.){3}\d{1,3}$/.test(sni)
+  const insecure = streamSettings?.insecure !== undefined
+    ? Boolean(streamSettings.insecure)
+    : (settings?.insecure !== undefined ? Boolean(settings.insecure) : isIpSni)
+
+  // 6. Up / Down speed
+  const upMbps = settings?.up_mbps || streamSettings?.up_mbps || 100
+  const downMbps = settings?.down_mbps || streamSettings?.down_mbps || 100
+
+  return {
+    obfsPassword,
+    ports,
+    hopInterval,
+    sni,
+    alpn,
+    insecure,
+    upMbps,
+    downMbps,
+  }
+}
+
+/**
  * Generate ShadowTLS + Shadowsocks share link (standard SIP002 format)
  */
 export function generateShadowtlsLink({
@@ -129,11 +194,19 @@ export function generateTrojanLink({ password, host, port, sni, remark }) {
 /**
  * Generate Hysteria2 share link
  */
-export function generateHy2Link({ password, host, port, sni, remark }) {
+export function generateHy2Link({ password, host, port, sni, alpn = 'h3', obfsPassword, ports, insecure = true, remark }) {
   const params = new URLSearchParams()
   if (sni) params.set('sni', sni)
-  params.set('insecure', '1')
-  return `hy2://${password}@${host}:${port}?${params.toString()}#${encodeURIComponent(remark || 'VPN')}`
+  if (alpn) params.set('alpn', alpn)
+  if (insecure) params.set('insecure', '1')
+  if (obfsPassword) {
+    params.set('obfs', 'salamander')
+    params.set('obfs-password', obfsPassword)
+  }
+  if (ports) {
+    params.set('mport', ports)
+  }
+  return `hy2://${password}@${host}:${port}/?${params.toString()}#${encodeURIComponent(remark || 'VPN')}`
 }
 
 /**
@@ -196,10 +269,11 @@ export function generateClashYaml(inbound, client, host) {
 
   if (type === 'vless' || protocol === 'vless') {
     const uuid = client?.uuid || ''
-    const isReality = streamSettings.security === 'reality' || settings.reality
-    const sni = streamSettings.serverName || settings.serverName || host
-    const publicKey = streamSettings.publicKey || settings.publicKey || ''
-    const shortId = streamSettings.shortId || settings.shortId || ''
+    const isReality = streamSettings.security === 'reality' || settings.reality || Boolean(streamSettings.realitySettings)
+    const realSettings = streamSettings.realitySettings || {}
+    const sni = streamSettings.serverName || settings.serverName || (realSettings.serverNames?.[0]) || host
+    const publicKey = streamSettings.publicKey || settings.publicKey || realSettings.publicKey || ''
+    const shortId = streamSettings.shortId || settings.shortId || (realSettings.shortIds?.[0]) || ''
     const flow = client?.flow || (isReality ? 'xtls-rprx-vision' : '')
 
     if (isReality) {
@@ -233,21 +307,27 @@ export function generateClashYaml(inbound, client, host) {
   }
 
   if (type === 'hysteria2' || protocol === 'hysteria2' || type === 'hysteria' || protocol === 'hysteria') {
-    const auth = client?.password || settings.auth || settings.password || ''
-    const sni = streamSettings.serverName || settings.serverName || host
+    const auth = client?.password || client?.auth || settings.auth || settings.password || ''
+    const hy2 = extractHysteriaDetails(inbound, settings, streamSettings, host)
+
     return `proxies:
   - name: "${remark}"
     type: hysteria2
     server: ${host}
-    port: ${port}
+    port: ${port}${hy2.ports ? `\n    ports: "${hy2.ports}"\n    hop-interval: ${hy2.hopInterval || 30}` : ''}
     password: "${auth}"
-    sni: "${sni}"
-    skip-cert-verify: true`
+    sni: "${hy2.sni}"
+    alpn:
+      - ${hy2.alpn}
+    skip-cert-verify: ${hy2.insecure ? 'true' : 'false'}${hy2.obfsPassword ? `\n    obfs: salamander\n    obfs-password: "${hy2.obfsPassword}"` : ''}
+    up: "${hy2.upMbps} Mbps"
+    down: "${hy2.downMbps} Mbps"
+    client-fingerprint: chrome`
   }
 
   if (type === 'trojan' || protocol === 'trojan') {
     const password = client?.password || settings.password || ''
-    const sni = streamSettings.serverName || settings.serverName || host
+    const sni = streamSettings.tlsSettings?.serverName || streamSettings.serverName || settings.serverName || host
     return `proxies:
   - name: "${remark}"
     type: trojan
@@ -324,10 +404,11 @@ export function generateSingboxJson(inbound, client, host) {
 
   if (type === 'vless' || protocol === 'vless') {
     const uuid = client?.uuid || ''
-    const isReality = streamSettings.security === 'reality' || settings.reality
-    const sni = streamSettings.serverName || settings.serverName || host
-    const publicKey = streamSettings.publicKey || settings.publicKey || ''
-    const shortId = streamSettings.shortId || settings.shortId || ''
+    const isReality = streamSettings.security === 'reality' || settings.reality || Boolean(streamSettings.realitySettings)
+    const realSettings = streamSettings.realitySettings || {}
+    const sni = streamSettings.serverName || settings.serverName || (realSettings.serverNames?.[0]) || host
+    const publicKey = streamSettings.publicKey || settings.publicKey || realSettings.publicKey || ''
+    const shortId = streamSettings.shortId || settings.shortId || (realSettings.shortIds?.[0]) || ''
     const flow = client?.flow || (isReality ? 'xtls-rprx-vision' : '')
 
     const outbounds = [
@@ -358,6 +439,37 @@ export function generateSingboxJson(inbound, client, host) {
     return JSON.stringify({ outbounds }, null, 2)
   }
 
+  if (type === 'hysteria2' || protocol === 'hysteria2' || type === 'hysteria' || protocol === 'hysteria') {
+    const auth = client?.password || client?.auth || settings.auth || settings.password || ''
+    const hy2 = extractHysteriaDetails(inbound, settings, streamSettings, host)
+
+    const outbounds = [
+      {
+        type: 'hysteria2',
+        tag: remark,
+        server: host,
+        server_port: port,
+        ...(hy2.ports ? { server_ports: hy2.ports, hop_interval: `${hy2.hopInterval || 30}s` } : {}),
+        up_mbps: hy2.upMbps || 100,
+        down_mbps: hy2.downMbps || 100,
+        password: auth,
+        ...(hy2.obfsPassword ? { obfs: { type: 'salamander', password: hy2.obfsPassword } } : {}),
+        tls: {
+          enabled: true,
+          server_name: hy2.sni,
+          alpn: [hy2.alpn || 'h3'],
+          insecure: Boolean(hy2.insecure),
+          utls: {
+            enabled: true,
+            fingerprint: 'chrome',
+          },
+        },
+      },
+    ]
+
+    return JSON.stringify({ outbounds }, null, 2)
+  }
+
   return JSON.stringify({
     outbounds: [
       {
@@ -368,6 +480,49 @@ export function generateSingboxJson(inbound, client, host) {
       },
     ],
   }, null, 2)
+}
+
+/**
+ * Generate official Hysteria 2 client YAML (config.yaml)
+ */
+export function generateHysteriaCliConfig(inbound, client, host) {
+  if (!inbound) return ''
+  const remark = client?.remark || client?.email || inbound.remark || `${inbound.type}-${inbound.port}`
+  const port = inbound.port
+  const { settings, streamSettings } = extractSettings(inbound)
+  const auth = client?.password || client?.auth || settings.auth || settings.password || ''
+  const hy2 = extractHysteriaDetails(inbound, settings, streamSettings, host)
+
+  const serverField = hy2.ports ? `${host}:${port},${hy2.ports}` : `${host}:${port}`
+
+  return `# Official Hysteria 2 Client Configuration (${remark})
+server: ${serverField}
+auth: "${auth}"
+
+tls:
+  sni: "${hy2.sni}"
+  insecure: ${hy2.insecure ? 'true' : 'false'}
+  alpn:
+    - "${hy2.alpn}"
+
+${hy2.obfsPassword ? `obfs:
+  type: salamander
+  salamander:
+    password: "${hy2.obfsPassword}"` : '# obfs: none'}
+
+bandwidth:
+  up: ${hy2.upMbps} mbps
+  down: ${hy2.downMbps} mbps
+
+quic:
+  initStreamReceiveWindow: 8388608
+  maxStreamReceiveWindow: 8388608
+  initConnectionReceiveWindow: 20971520
+  maxConnectionReceiveWindow: 20971520
+
+fastOpen: true
+lazy: true
+`
 }
 
 /**

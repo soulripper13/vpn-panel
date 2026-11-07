@@ -150,13 +150,11 @@ class SingboxService {
    */
   static async writeConfig(configObject) {
     const jsonStr = JSON.stringify(configObject, null, 2);
-    const tempPath = `${cfg.SINGBOX_CONFIG}.tmp`;
-
-    // Ensure directory exists
     const dir = path.dirname(cfg.SINGBOX_CONFIG);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
+    const tempPath = path.join(dir, 'config.tmp.json');
 
     // Write temp file
     fs.writeFileSync(tempPath, jsonStr, 'utf8');
@@ -164,11 +162,12 @@ class SingboxService {
     // Validate using sing-box check
     try {
       if (fs.existsSync(cfg.SINGBOX_BIN)) {
-        await execAsync(`${cfg.SINGBOX_BIN} check -c "${tempPath}"`);
+        await execAsync(`"${cfg.SINGBOX_BIN}" check -c "${tempPath}"`);
       }
     } catch (err) {
       try { fs.unlinkSync(tempPath); } catch {}
-      throw new Error(`sing-box config validation failed: ${err.stderr || err.message}`);
+      const errMsg = err.stderr || err.stdout || err.message;
+      throw new Error(`sing-box config validation failed: ${errMsg}`);
     }
 
     // Atomic overwrite

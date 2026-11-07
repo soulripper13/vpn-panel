@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { X, Plus, Trash2, QrCode, Copy, Check, Users, User, Key, RefreshCw, Shield, Zap } from 'lucide-react'
-import { generateUUID, generatePassword, generateHexPassword, extractSettings } from '../../utils/links'
+import { generateUUID, generatePassword, generateHexPassword, extractSettings, extractHysteriaDetails } from '../../utils/links'
 import { formatBytes } from '../../utils/format'
 import api from '../../utils/api'
 import toast from 'react-hot-toast'
@@ -19,6 +19,8 @@ export default function ClientModal({ isOpen, onClose, inbound, onUpdate }) {
   const isShadowtls = inbound?.type === 'shadowtls' || inbound?.protocol === 'shadowtls'
   const isVless = inbound?.type === 'vless' || inbound?.protocol === 'vless'
   const isVmess = inbound?.type === 'vmess' || inbound?.protocol === 'vmess'
+  const isHysteria = inbound?.type === 'hysteria' || inbound?.type === 'hysteria2' || inbound?.protocol === 'hysteria' || inbound?.protocol === 'hysteria2'
+  const hy2Details = isHysteria ? extractHysteriaDetails(inbound, settings, streamSettings, window.location.hostname || '107.182.23.115') : null
 
   // New client form state
   const [newEmail, setNewEmail] = useState('')
@@ -79,7 +81,7 @@ export default function ClientModal({ isOpen, onClose, inbound, onUpdate }) {
       const res = await api.post(`/inbounds/${inbound.id}/clients`, {
         email: newEmail.trim(),
         uuid: newUuid,
-        password: isShadowtls ? newPassword.trim() : (newPassword || newUuid),
+        password: isShadowtls || isHysteria ? newPassword.trim() : (newPassword || newUuid),
         flow: isVless ? newFlow : '',
         remark: newRemark.trim(),
         enable: true,
@@ -146,6 +148,47 @@ export default function ClientModal({ isOpen, onClose, inbound, onUpdate }) {
           </div>
         )}
 
+        {/* Hysteria 2 Anti-Censorship Info Badge */}
+        {isHysteria && (
+          <div className="mt-3 p-3 bg-amber-950/30 border border-amber-500/30 rounded-xl text-xs space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-1.5 text-amber-300 font-semibold">
+                <Zap className="w-4 h-4 text-amber-400" />
+                <span>Hysteria 2 Anti-Censorship Profile</span>
+              </div>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                Russia TSPU & China GFW Ready
+              </span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] text-slate-300 font-mono">
+              <div className="bg-[#14161f] p-1.5 rounded border border-[#2d3148]">
+                <span className="text-slate-500 block text-[10px]">Salamander Obfs</span>
+                <span className={hy2Details?.obfsPassword ? "text-amber-300 font-medium truncate block" : "text-slate-400"}>
+                  {hy2Details?.obfsPassword ? `Key: ${hy2Details.obfsPassword}` : 'Disabled'}
+                </span>
+              </div>
+              <div className="bg-[#14161f] p-1.5 rounded border border-[#2d3148]">
+                <span className="text-slate-500 block text-[10px]">Port Hopping</span>
+                <span className={hy2Details?.ports ? "text-emerald-300 font-medium truncate block" : "text-slate-400"}>
+                  {hy2Details?.ports || 'Single Port'}
+                </span>
+              </div>
+              <div className="bg-[#14161f] p-1.5 rounded border border-[#2d3148]">
+                <span className="text-slate-500 block text-[10px]">SNI (Cert)</span>
+                <span className="text-indigo-300 truncate block">
+                  {hy2Details?.sni || '107.182.23.115'}
+                </span>
+              </div>
+              <div className="bg-[#14161f] p-1.5 rounded border border-[#2d3148]">
+                <span className="text-slate-500 block text-[10px]">ALPN</span>
+                <span className="text-purple-300 font-medium">
+                  {hy2Details?.alpn || 'h3'}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Client List */}
         <div className="flex-1 overflow-y-auto py-4 space-y-3">
           {clients.length === 0 ? (
@@ -173,6 +216,11 @@ export default function ClientModal({ isOpen, onClose, inbound, onUpdate }) {
                       <>
                         <span className="text-slate-500">Plugin Pass:</span>
                         <span className="text-purple-300 font-medium">{c.password || '—'}</span>
+                      </>
+                    ) : isHysteria ? (
+                      <>
+                        <span className="text-slate-500">Auth Key:</span>
+                        <span className="text-amber-300 font-medium">{c.password || c.auth || c.uuid}</span>
                       </>
                     ) : isVless || isVmess ? (
                       <>
@@ -292,6 +340,30 @@ export default function ClientModal({ isOpen, onClose, inbound, onUpdate }) {
                 />
                 <p className="text-[11px] text-slate-400">
                   This 32-hex password will be used under <code className="text-purple-300">plugin-opts.password</code> in Clash and by Shadow-TLS clients.
+                </p>
+              </div>
+            ) : isHysteria ? (
+              <div className="p-3 bg-[#1a1d27] border border-amber-500/30 rounded-lg space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs text-amber-300 font-medium">Hysteria 2 Auth Password</label>
+                  <button
+                    type="button"
+                    onClick={() => setNewPassword(generatePassword(16))}
+                    className="text-[11px] text-amber-400 hover:text-amber-300 flex items-center space-x-1"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    <span>Regen</span>
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  required
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="w-full bg-[#14161f] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-amber-500"
+                />
+                <p className="text-[11px] text-slate-400">
+                  Client authentication credential for Hysteria 2. Automatically inherits Salamander obfs {hy2Details?.obfsPassword ? 'key' : ''} and port hopping ({hy2Details?.ports || '20000-50000'}).
                 </p>
               </div>
             ) : isVless || isVmess ? (

@@ -100,7 +100,15 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess }) {
   const [shadowtlsVersion, setShadowtlsVersion] = useState(3)
   const [upMbps, setUpMbps] = useState(100)
   const [downMbps, setDownMbps] = useState(100)
+  const [obfsEnabled, setObfsEnabled] = useState(true)
   const [obfsPassword, setObfsPassword] = useState(generatePassword(8))
+  const [udpHopEnabled, setUdpHopEnabled] = useState(true)
+  const [udpHopPorts, setUdpHopPorts] = useState('20000-50000')
+  const [hopInterval, setHopInterval] = useState('5-10')
+  const [certPreset, setCertPreset] = useState('domain')
+  const [certificateFile, setCertificateFile] = useState('/root/cert/bb88.soulripper13.online/fullchain.pem')
+  const [keyFile, setKeyFile] = useState('/root/cert/bb88.soulripper13.online/privkey.pem')
+  const [clientAuth, setClientAuth] = useState(generatePassword(16))
   const [tuicCongestion, setTuicCongestion] = useState('bbr')
 
   // 5. Client & Flow
@@ -112,6 +120,19 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess }) {
   const [sniffing, setSniffing] = useState(true)
 
   if (!isOpen) return null
+
+  const handleCertPresetChange = (preset) => {
+    setCertPreset(preset)
+    if (preset === 'domain') {
+      setServerName('bb88.soulripper13.online')
+      setCertificateFile('/root/cert/bb88.soulripper13.online/fullchain.pem')
+      setKeyFile('/root/cert/bb88.soulripper13.online/privkey.pem')
+    } else if (preset === 'ip') {
+      setServerName('107.182.23.115')
+      setCertificateFile('/root/cert/ip/fullchain.pem')
+      setKeyFile('/root/cert/ip/privkey.pem')
+    }
+  }
 
   const handleProtocolSelect = (protoType) => {
     setSelectedProtocol(protoType)
@@ -132,7 +153,17 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess }) {
       generateRealityKeys()
     } else if (protoType === 'hysteria2') {
       setSecurity('tls')
-      setServerName('107.182.23.115')
+      setServerName('bb88.soulripper13.online')
+      setAlpn('h3,h2,http/1.1')
+      setCertPreset('domain')
+      setCertificateFile('/root/cert/bb88.soulripper13.online/fullchain.pem')
+      setKeyFile('/root/cert/bb88.soulripper13.online/privkey.pem')
+      setUdpHopEnabled(true)
+      setUdpHopPorts('20000-50000')
+      setHopInterval('5-10')
+      setObfsEnabled(true)
+      setObfsPassword(generatePassword(8))
+      setClientAuth(generatePassword(16))
     } else if (protoType === 'tuic') {
       setSecurity('tls')
       setServerName('107.182.23.115')
@@ -177,6 +208,12 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess }) {
       const expiryEpoch = expiryDays > 0 ? Math.floor(Date.now() / 1000) + expiryDays * 86400 : 0
       const bytesLimit = totalTrafficLimitGb > 0 ? totalTrafficLimitGb * 1024 * 1024 * 1024 : 0
 
+      const finalObfs = (selectedProtocol === 'hysteria2' && obfsEnabled) ? obfsPassword.trim() : ''
+      const finalHopPorts = (selectedProtocol === 'hysteria2' && udpHopEnabled) ? udpHopPorts.trim() : ''
+      const finalClientPass = selectedProtocol === 'shadowtls'
+        ? shadowtlsPassword
+        : (selectedProtocol === 'hysteria2' ? clientAuth : password)
+
       const payload = {
         engine,
         type: selectedProtocol,
@@ -190,12 +227,15 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess }) {
           ssMethod,
           ssPassword,
           shadowtlsPassword,
-          password: selectedProtocol === 'shadowtls' ? shadowtlsPassword : password,
+          password: finalClientPass,
           serverName,
           shadowtlsVersion,
           up_mbps: upMbps,
           down_mbps: downMbps,
-          obfsPassword,
+          obfsPassword: finalObfs,
+          ports: finalHopPorts,
+          udpHopPorts: finalHopPorts,
+          hopInterval,
           congestion_control: tuicCongestion,
           dest,
           privateKey,
@@ -204,7 +244,7 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess }) {
           fingerprint,
         },
         stream_settings: {
-          network: transport,
+          network: selectedProtocol === 'hysteria2' ? 'hysteria' : transport,
           security,
           serverName,
           dest,
@@ -216,14 +256,57 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess }) {
           wsPath,
           wsHost,
           grpcServiceName,
-          obfsPassword,
+          obfsPassword: finalObfs,
+          ports: finalHopPorts,
+          udpHopPorts: finalHopPorts,
+          hopInterval,
+          certificateFile,
+          keyFile,
           sniffing,
+          ...(selectedProtocol === 'hysteria2' && (finalHopPorts || finalObfs) ? {
+            finalmask: {
+              ...(finalHopPorts ? {
+                quicParams: {
+                  congestion: 'bbr',
+                  udpHop: {
+                    ports: finalHopPorts,
+                    interval: hopInterval || '5-10',
+                  },
+                },
+              } : {}),
+              ...(finalObfs ? {
+                udp: [
+                  {
+                    type: 'salamander',
+                    settings: { password: finalObfs },
+                  },
+                ],
+              } : {}),
+            },
+          } : {}),
+          ...(selectedProtocol === 'hysteria2' ? {
+            hysteriaSettings: {
+              auth: '',
+              udpIdleTimeout: 60,
+              version: 2,
+            },
+            tlsSettings: {
+              alpn: ['h3', 'h2', 'http/1.1'],
+              serverName,
+              certificates: [
+                {
+                  certificateFile,
+                  keyFile,
+                },
+              ],
+            },
+          } : {}),
         },
         clients: [
           {
             email: clientEmail,
             uuid: clientUuid,
-            password: selectedProtocol === 'shadowtls' ? shadowtlsPassword : password,
+            password: finalClientPass,
             flow: selectedProtocol === 'vless' && security === 'reality' ? clientFlow : '',
             total_bytes_limit: bytesLimit,
             expiry_time: expiryEpoch,
@@ -771,13 +854,163 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess }) {
               )}
 
               {selectedProtocol === 'hysteria2' && (
-                <div className="bg-[#14161f] border border-[#2d3148] rounded-xl p-4 space-y-3">
-                  <div className="flex items-center space-x-2 text-xs font-semibold text-slate-300 uppercase tracking-wider">
-                    <Zap className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Hysteria 2 Protocol Settings</span>
+                <div className="bg-[#14161f] border border-amber-500/30 rounded-xl p-4 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2 text-xs font-semibold text-amber-300 uppercase tracking-wider">
+                      <Zap className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Hysteria 2 Anti-Censorship Configuration</span>
+                    </div>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                      Russia & China Bypass Ready
+                    </span>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="p-2.5 bg-amber-950/20 border border-amber-500/20 rounded-lg text-[11px] text-amber-200/90 leading-relaxed">
+                    Combines <strong>Salamander obfuscation</strong> (scrambling QUIC headers against TSPU/GFW protocol matching) and <strong>UDP port hopping</strong> (cycling through 30,000 ports to defeat port throttling and firewall session drops).
+                  </div>
+
+                  {/* 1. Salamander Obfs */}
+                  <div className="p-3 bg-[#1a1d27] border border-[#2d3148] rounded-xl space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <label className="text-xs font-medium text-slate-200">Salamander Obfuscation</label>
+                        <p className="text-[10px] text-slate-400">Scrambles QUIC packets so DPI cannot identify Hysteria 2 protocol</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setObfsEnabled(!obfsEnabled)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-medium transition ${
+                          obfsEnabled ? 'bg-amber-600 text-white' : 'bg-slate-800 text-slate-400'
+                        }`}
+                      >
+                        {obfsEnabled ? 'Enabled' : 'Disabled'}
+                      </button>
+                    </div>
+
+                    {obfsEnabled && (
+                      <div className="pt-2">
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-xs text-amber-300">Salamander Password</label>
+                          <button
+                            type="button"
+                            onClick={() => setObfsPassword(generatePassword(8))}
+                            className="text-[10px] text-amber-400 hover:text-amber-300 flex items-center space-x-1"
+                          >
+                            <RefreshCw className="w-2.5 h-2.5" />
+                            <span>Gen New</span>
+                          </button>
+                        </div>
+                        <input
+                          type="text"
+                          required
+                          value={obfsPassword}
+                          onChange={(e) => setObfsPassword(e.target.value)}
+                          className="w-full bg-[#14161f] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-amber-500"
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 2. UDP Port Hopping */}
+                  <div className="p-3 bg-[#1a1d27] border border-[#2d3148] rounded-xl space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <label className="text-xs font-medium text-slate-200">UDP Port Hopping</label>
+                        <p className="text-[10px] text-slate-400">Randomizes destination UDP ports dynamically to bypass throttling</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setUdpHopEnabled(!udpHopEnabled)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-medium transition ${
+                          udpHopEnabled ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400'
+                        }`}
+                      >
+                        {udpHopEnabled ? 'Enabled' : 'Disabled'}
+                      </button>
+                    </div>
+
+                    {udpHopEnabled && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                        <div>
+                          <label className="text-xs text-slate-400 block mb-1">Port Range</label>
+                          <input
+                            type="text"
+                            required
+                            value={udpHopPorts}
+                            onChange={(e) => setUdpHopPorts(e.target.value)}
+                            placeholder="20000-50000"
+                            className="w-full bg-[#14161f] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-emerald-500"
+                          />
+                          <span className="text-[10px] text-slate-500">Redirected via Linux kernel iptables</span>
+                        </div>
+                        <div>
+                          <label className="text-xs text-slate-400 block mb-1">Hop Interval (sec)</label>
+                          <input
+                            type="text"
+                            value={hopInterval}
+                            onChange={(e) => setHopInterval(e.target.value)}
+                            placeholder="5-10 or 30"
+                            className="w-full bg-[#14161f] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-emerald-500"
+                          />
+                          <span className="text-[10px] text-slate-500">e.g. 5-10 or 30</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 3. TLS Certificates & SNI */}
+                  <div className="p-3 bg-[#1a1d27] border border-[#2d3148] rounded-xl space-y-2">
+                    <label className="text-xs font-medium text-slate-200 block">TLS Certificate & Server Domain</label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleCertPresetChange('domain')}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition ${
+                          certPreset === 'domain'
+                            ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/50'
+                            : 'bg-slate-800 text-slate-400 border-slate-700'
+                        }`}
+                      >
+                        Domain (bb88.soulripper13.online)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleCertPresetChange('ip')}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition ${
+                          certPreset === 'ip'
+                            ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/50'
+                            : 'bg-slate-800 text-slate-400 border-slate-700'
+                        }`}
+                      >
+                        IP Cert (107.182.23.115)
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                      <div>
+                        <label className="text-xs text-slate-400 block mb-1">SNI (Server Name)</label>
+                        <input
+                          type="text"
+                          required
+                          value={serverName}
+                          onChange={(e) => setServerName(e.target.value)}
+                          className="w-full bg-[#14161f] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-slate-400 block mb-1">ALPN Protocol</label>
+                        <input
+                          type="text"
+                          value={alpn}
+                          onChange={(e) => setAlpn(e.target.value)}
+                          className="w-full bg-[#14161f] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 4. Bandwidth limits */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs text-slate-400 block mb-1">Up Bandwidth (Mbps)</label>
                       <input
@@ -787,33 +1020,12 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess }) {
                         className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
                       />
                     </div>
-
                     <div>
                       <label className="text-xs text-slate-400 block mb-1">Down Bandwidth (Mbps)</label>
                       <input
                         type="number"
                         value={downMbps}
                         onChange={(e) => setDownMbps(e.target.value)}
-                        className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
-                      />
-                    </div>
-
-                    <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <label className="text-xs text-slate-400">Salamander Obfs</label>
-                        <button
-                          type="button"
-                          onClick={() => setObfsPassword(generatePassword(8))}
-                          className="text-[10px] text-indigo-400 hover:text-indigo-300"
-                        >
-                          Gen
-                        </button>
-                      </div>
-                      <input
-                        type="text"
-                        value={obfsPassword}
-                        onChange={(e) => setObfsPassword(e.target.value)}
-                        placeholder="Leave empty for none"
                         className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
                       />
                     </div>
@@ -842,20 +1054,31 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess }) {
 
                   <div>
                     <div className="flex items-center justify-between mb-1">
-                      <label className="text-xs text-slate-400">UUID / Key</label>
+                      <label className="text-xs text-slate-400">
+                        {selectedProtocol === 'hysteria2' ? 'Client Auth Password' : 'UUID / Key'}
+                      </label>
                       <button
                         type="button"
-                        onClick={() => setClientUuid(generateUUID())}
+                        onClick={() => {
+                          setClientUuid(generateUUID())
+                          setClientAuth(generatePassword(16))
+                        }}
                         className="text-[10px] text-indigo-400 hover:text-indigo-300"
                       >
-                        New UUID
+                        {selectedProtocol === 'hysteria2' ? 'Gen Auth' : 'New UUID'}
                       </button>
                     </div>
                     <input
                       type="text"
                       required
-                      value={clientUuid}
-                      onChange={(e) => setClientUuid(e.target.value)}
+                      value={selectedProtocol === 'hysteria2' ? clientAuth : clientUuid}
+                      onChange={(e) => {
+                        if (selectedProtocol === 'hysteria2') {
+                          setClientAuth(e.target.value)
+                        } else {
+                          setClientUuid(e.target.value)
+                        }
+                      }}
                       className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
                     />
                   </div>

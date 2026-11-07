@@ -128,7 +128,8 @@ export default function Clients() {
 
       const targetInbound = inbounds.find((i) => i.id === parseInt(targetInboundId, 10))
       const isTargetStls = targetInbound?.type === 'shadowtls' || targetInbound?.protocol === 'shadowtls'
-      const finalPassword = isTargetStls ? clientPassword.trim() : (clientPassword || clientUuid)
+      const isTargetHy2 = targetInbound?.type === 'hysteria2' || targetInbound?.protocol === 'hysteria2' || targetInbound?.type === 'hysteria' || targetInbound?.protocol === 'hysteria'
+      const finalPassword = isTargetStls || isTargetHy2 ? clientPassword.trim() : (clientPassword || clientUuid)
 
       const res = await api.post(`/inbounds/${targetInboundId}/clients`, {
         email: clientEmail.trim(),
@@ -232,11 +233,34 @@ export default function Clients() {
                         <span>{c.email}</span>
                       </div>
                       {c.remark && <div className="text-[11px] text-slate-500 font-normal pl-5">{c.remark}</div>}
+                      <div className="pl-5 pt-1 text-[11px] font-mono text-slate-400">
+                        {c.inboundProtocol === 'hysteria2' || c.inboundProtocol === 'hysteria' ? (
+                          <span className="text-amber-300">Auth: {c.password || c.auth || c.uuid}</span>
+                        ) : c.inboundProtocol === 'shadowtls' ? (
+                          <span className="text-purple-300">Pass: {c.password || '—'}</span>
+                        ) : c.inboundProtocol === 'vless' || c.inboundProtocol === 'vmess' ? (
+                          <span className="text-indigo-300">UUID: {c.uuid}</span>
+                        ) : (
+                          <span className="text-emerald-300">Key: {c.password || c.uuid}</span>
+                        )}
+                      </div>
                     </td>
 
                     <td className="px-5 py-4 text-slate-300">
                       <div>{c.inboundRemark}</div>
-                      <div className="text-[11px] text-slate-500 uppercase font-mono">{c.inboundProtocol}</div>
+                      <div className="flex items-center space-x-1.5 mt-0.5">
+                        <span className="text-[10px] text-indigo-400 uppercase font-mono">{c.inboundProtocol}</span>
+                        {(c.inboundProtocol === 'hysteria2' || c.inboundProtocol === 'hysteria') && (
+                          <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                            QUIC Hop
+                          </span>
+                        )}
+                        {c.inboundProtocol === 'shadowtls' && (
+                          <span className="text-[10px] px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                            TLS Detour
+                          </span>
+                        )}
+                      </div>
                     </td>
 
                     <td className="px-5 py-4">
@@ -365,6 +389,7 @@ export default function Clients() {
               {(() => {
                 const targetInb = inbounds.find((i) => i.id === parseInt(selectedInboundId || inbounds[0]?.id, 10))
                 const isStls = targetInb?.type === 'shadowtls' || targetInb?.protocol === 'shadowtls'
+                const isHy2 = targetInb?.type === 'hysteria2' || targetInb?.protocol === 'hysteria2' || targetInb?.type === 'hysteria' || targetInb?.protocol === 'hysteria'
 
                 if (isStls) {
                   return (
@@ -389,6 +414,34 @@ export default function Clients() {
                       />
                       <p className="text-[11px] text-slate-400">
                         This plugin password will be used under <code className="text-purple-300 font-mono">plugin-opts.password</code> in OpenClash / Clash Meta.
+                      </p>
+                    </div>
+                  )
+                }
+
+                if (isHy2) {
+                  return (
+                    <div className="p-3 bg-[#14161f] border border-amber-500/30 rounded-xl space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-medium text-amber-300">Hysteria 2 Auth Password</label>
+                        <button
+                          type="button"
+                          onClick={() => setClientPassword(generatePassword(16))}
+                          className="text-[11px] text-amber-400 hover:text-amber-300 flex items-center space-x-1"
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                          <span>Randomize</span>
+                        </button>
+                      </div>
+                      <input
+                        type="text"
+                        required
+                        value={clientPassword}
+                        onChange={(e) => setClientPassword(e.target.value)}
+                        className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-amber-500"
+                      />
+                      <p className="text-[11px] text-slate-400">
+                        Client authentication key. Inherits Salamander obfuscation and port hopping from listener [{targetInb?.remark || targetInb?.tag}].
                       </p>
                     </div>
                   )

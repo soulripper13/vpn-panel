@@ -377,8 +377,35 @@ function generateXrayInbound(type, opts = {}) {
       }
     : { sniffing: { enabled: false } };
 
+  const rawStreamSettings = opts.streamSettings || opts.stream_settings;
+
   switch (type.toLowerCase()) {
     case 'vless':
+      let vlessStreamSettings;
+      if (rawStreamSettings && (rawStreamSettings.realitySettings || rawStreamSettings.security === 'reality')) {
+        vlessStreamSettings = {
+          network: rawStreamSettings.network || 'tcp',
+          security: 'reality',
+          realitySettings: {
+            show: false,
+            dest: rawStreamSettings.realitySettings?.dest || rawStreamSettings.realitySettings?.target || dest || 'www.microsoft.com:443',
+            xver: rawStreamSettings.realitySettings?.xver || 0,
+            serverNames: rawStreamSettings.realitySettings?.serverNames || [serverName || 'www.microsoft.com'],
+            privateKey: rawStreamSettings.realitySettings?.privateKey || privateKey || '',
+            shortIds: rawStreamSettings.realitySettings?.shortIds || (shortId ? [shortId] : ['']),
+            fingerprint: rawStreamSettings.realitySettings?.fingerprint || fingerprint || 'chrome',
+            ...(rawStreamSettings.realitySettings?.minClientVer ? { minClientVer: rawStreamSettings.realitySettings.minClientVer } : {}),
+            ...(rawStreamSettings.realitySettings?.maxClientVer ? { maxClientVer: rawStreamSettings.realitySettings.maxClientVer } : {}),
+            ...(rawStreamSettings.realitySettings?.maxTimediff ? { maxTimediff: rawStreamSettings.realitySettings.maxTimediff } : {}),
+          },
+          tcpSettings: rawStreamSettings.tcpSettings || { header: { type: 'none' } },
+        };
+      } else if (rawStreamSettings && rawStreamSettings.network) {
+        vlessStreamSettings = rawStreamSettings;
+      } else {
+        vlessStreamSettings = buildStreamSettings();
+      }
+
       return {
         tag,
         listen,
@@ -386,13 +413,14 @@ function generateXrayInbound(type, opts = {}) {
         protocol: 'vless',
         settings: {
           clients: clientList.map((c) => ({
-            id: c.uuid || uuidv4(),
-            flow: c.flow || (security === 'reality' ? 'xtls-rprx-vision' : ''),
+            id: c.uuid || c.id || uuidv4(),
+            flow: c.flow || (security === 'reality' || vlessStreamSettings.security === 'reality' ? 'xtls-rprx-vision' : ''),
             email: c.email || '',
           })),
-          decryption: 'none',
+          decryption: opts.decryption || 'none',
+          ...(opts.testseed ? { testseed: opts.testseed } : {}),
         },
-        streamSettings: buildStreamSettings(),
+        streamSettings: vlessStreamSettings,
         ...sniffBlock,
       };
 
@@ -409,7 +437,7 @@ function generateXrayInbound(type, opts = {}) {
             email: c.email || '',
           })),
         },
-        streamSettings: buildStreamSettings(),
+        streamSettings: rawStreamSettings || buildStreamSettings(),
         ...sniffBlock,
       };
 
@@ -426,48 +454,123 @@ function generateXrayInbound(type, opts = {}) {
             flow: c.flow || '',
           })),
         },
-        streamSettings: buildStreamSettings(),
+        streamSettings: rawStreamSettings || buildStreamSettings(),
         ...sniffBlock,
       };
 
     case 'hysteria':
     case 'hysteria2':
-      return {
-        tag,
-        listen,
-        port: parseInt(port, 10),
-        protocol: 'hysteria',
-        settings: {
-          clients: clientList.map((c) => ({
-            auth: c.password || c.uuid || uuidv4(),
-            email: c.email || '',
-          })),
-          version: 2,
-        },
-        streamSettings: {
+      const hysteriaClients = clientList.map((c) => ({
+        auth: c.password || c.uuid || c.auth || uuidv4().replace(/-/g, '').slice(0, 16),
+        email: c.email || '',
+      }));
+
+      let hy2StreamSettings;
+      if (rawStreamSettings && (rawStreamSettings.network === 'hysteria' || rawStreamSettings.finalmask || rawStreamSettings.tlsSettings)) {
+        hy2StreamSettings = {
+          ...rawStreamSettings,
           network: 'hysteria',
           security: 'tls',
+        };
+        const obfs = opts.obfsPassword || rawStreamSettings.obfsPassword;
+        if (obfs && !hy2StreamSettings.finalmask?.udp) {
+          hy2StreamSettings.finalmask = {
+            ...(hy2StreamSettings.finalmask || {}),
+            udp: [
+              {
+                type: 'salamander',
+                settings: { password: obfs },
+              },
+            ],
+          };
+        }
+        const hopPorts = opts.udpHopPorts || rawStreamSettings.udpHopPorts || rawStreamSettings.ports;
+        if (hopPorts && !hy2StreamSettings.finalmask?.quicParams?.udpHop) {
+          hy2StreamSettings.finalmask = {
+            ...(hy2StreamSettings.finalmask || {}),
+            quicParams: {
+              congestion: 'bbr',
+              udpHop: {
+                ports: hopPorts,
+                interval: opts.hopInterval || rawStreamSettings.hopInterval || '5-10',
+              },
+            },
+          };
+        }
+        if (!hy2StreamSettings.tlsSettings?.certificates || hy2StreamSettings.tlsSettings.certificates.length === 0) {
+          hy2StreamSettings.tlsSettings = {
+            ...(hy2StreamSettings.tlsSettings || {}),
+            alpn: ['h3', 'h2', 'http/1.1'],
+            serverName: serverName || opts.sni || 'bb88.soulripper13.online',
+            certificates: [
+              {
+                certificateFile: opts.certificateFile || rawStreamSettings.certificateFile || cfg.CERT_FULLCHAIN,
+                keyFile: opts.keyFile || rawStreamSettings.keyFile || cfg.CERT_PRIVKEY,
+              },
+            ],
+          };
+        }
+      } else {
+        const certFile = opts.certificateFile || cfg.CERT_FULLCHAIN;
+        const keyFile = opts.keyFile || cfg.CERT_PRIVKEY;
+        const sniName = serverName || opts.sni || 'bb88.soulripper13.online';
+
+        hy2StreamSettings = {
+          network: 'hysteria',
+          security: 'tls',
+          hysteriaSettings: {
+            auth: '',
+            udpIdleTimeout: 60,
+            version: 2,
+          },
           tlsSettings: {
             alpn: ['h3', 'h2', 'http/1.1'],
-            serverName: serverName || '127.0.0.1',
+            serverName: sniName,
             certificates: [
-              { certificateFile: cfg.CERT_FULLCHAIN, keyFile: cfg.CERT_PRIVKEY },
+              { certificateFile: certFile, keyFile: keyFile },
             ],
           },
-          ...(obfsPassword
+          ...(obfsPassword || opts.udpHopPorts
             ? {
                 finalmask: {
-                  udp: [
-                    {
-                      type: 'salamander',
-                      settings: { password: obfsPassword },
-                    },
-                  ],
+                  ...(opts.udpHopPorts
+                    ? {
+                        quicParams: {
+                          congestion: 'bbr',
+                          udpHop: {
+                            ports: opts.udpHopPorts,
+                            interval: opts.hopInterval || '5-10',
+                          },
+                        },
+                      }
+                    : {}),
+                  ...(obfsPassword
+                    ? {
+                        udp: [
+                          {
+                            type: 'salamander',
+                            settings: { password: obfsPassword },
+                          },
+                        ],
+                      }
+                    : {}),
                 },
               }
             : {}),
+        };
+      }
+
+      return {
+        tag,
+        listen: listen === '0.0.0.0' ? '::' : listen,
+        port: parseInt(port, 10),
+        protocol: 'hysteria',
+        settings: {
+          clients: hysteriaClients,
+          version: 2,
         },
-        ...sniffBlock,
+        streamSettings: hy2StreamSettings,
+        sniffing: { enabled: false },
       };
 
     case 'shadowsocks':
