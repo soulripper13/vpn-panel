@@ -76,7 +76,7 @@ header "Installing System Dependencies"
 apt-get update -qq
 apt-get install -y --no-install-recommends \
     curl wget ca-certificates gnupg lsb-release \
-    tar gzip unzip sqlite3 openssl ufw iptables jq git \
+    tar gzip unzip sqlite3 openssl ufw iptables jq git rsync \
     2>/dev/null
 success "System packages installed."
 

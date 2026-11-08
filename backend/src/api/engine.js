@@ -10,6 +10,7 @@ const router = express.Router();
 const SingboxService = require('../services/singbox');
 const XrayService = require('../services/xray');
 const BinaryUpdaterService = require('../services/binary-updater');
+const PanelUpdaterService = require('../services/panel-updater');
 const { requireAuth } = require('../middleware/auth');
 
 router.use(requireAuth);
@@ -175,6 +176,48 @@ router.post('/singbox/update', async (req, res) => {
 router.post('/xray/update', async (req, res) => {
   try {
     const result = await BinaryUpdaterService.updateXray(req.body.version);
+    return res.json({ success: true, message: result.message, data: result });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ─── PANEL SELF-UPDATE ────────────────────────────────────────────────────────
+
+/**
+ * GET /api/engine/panel/updates
+ * Check GitHub for latest VPN Panel release/commits
+ */
+router.get('/panel/updates', async (req, res) => {
+  try {
+    const force = req.query.force === 'true';
+    const data = await PanelUpdaterService.getStatus(force);
+    return res.json({ success: true, data });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/**
+ * GET /api/engine/panel/update/status
+ * Get real-time panel self-update logs and progress
+ */
+router.get('/panel/update/status', (req, res) => {
+  try {
+    const data = PanelUpdaterService.getUpdateProgress();
+    return res.json({ success: true, data });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/**
+ * POST /api/engine/panel/update
+ * Trigger VPN Panel self-update pipeline
+ */
+router.post('/panel/update', async (req, res) => {
+  try {
+    const result = await PanelUpdaterService.updatePanel();
     return res.json({ success: true, message: result.message, data: result });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });

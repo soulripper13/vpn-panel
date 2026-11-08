@@ -73,12 +73,17 @@ export default function Sidebar({ isOpen, onClose }) {
         </nav>
 
         {/* Footer info */}
-        <div className="p-4 border-t border-[#2d3148] m-3 bg-[#1a1d27]/60 rounded-xl flex items-center space-x-3">
-          <Layers className="w-4 h-4 text-purple-400" />
-          <div className="text-xs">
-            <p className="text-slate-300 font-medium">Dual-Core Active</p>
-            <p className="text-[11px] text-slate-500">sing-box + xray</p>
+        <div className="p-3 border-t border-[#2d3148] m-3 bg-[#1a1d27]/60 rounded-xl flex items-center justify-between">
+          <div className="flex items-center space-x-2.5">
+            <Layers className="w-4 h-4 text-purple-400" />
+            <div className="text-xs">
+              <p className="text-slate-300 font-medium">Dual-Core Active</p>
+              <p className="text-[10px] text-slate-500">sing-box + xray</p>
+            </div>
           </div>
+          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700/60">
+            v1.1.0
+          </span>
         </div>
       </aside>
     </>

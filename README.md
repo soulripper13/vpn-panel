@@ -7,13 +7,15 @@ A unified web management dashboard inspired by 3x-ui, capable of controlling **b
 ## 🌟 Key Features
 
 - **Dual-Engine Architecture:** Run `sing-box` and `Xray-core` at the same time, managed through a single cohesive dashboard.
+- **One-Click In-Panel Updates:** Update the VPN Panel itself, sing-box, and Xray-core directly from the web panel UI with real-time log streaming and automatic service reconnection.
 - **Extensive Protocol Support:**
   - **sing-box:** ShadowTLS v3, Shadowsocks 2022 (`2022-blake3-aes-128-gcm`), VLESS Reality, Hysteria 2, TUIC v5, NaiveProxy, WireGuard.
   - **Xray-core:** VLESS Reality / TLS, VMess (WebSocket + TLS), Trojan, Hysteria 2, Shadowsocks.
 - **Client & Inbound Management:**
-  - Create and configure multiple listening inbounds per engine.
+  - Create, edit, and configure multiple listening inbounds and clients per engine.
+  - Universal subscription endpoint (`/api/sub/:token`) supporting Clash Meta (with full Shadow-TLS v3 plugins), Sing-box JSON, and Base64.
   - Generate share links (`vless://`, `vmess://`, `trojan://`, `ss://`, `hy2://`, `tuic://`).
-  - Instant QR code generation for mobile clients (v2rayNG, Sing-box, FoXray, Streisand, Clash Meta).
+  - Instant QR code generation for mobile clients (v2rayNG, Shadowrocket, Sing-box, FoXray, Streisand, Clash Meta).
   - Per-inbound & per-client traffic quotas and expiration dates.
 - **Real-Time Monitoring:**
   - WebSocket telemetry push for CPU, RAM, and Disk utilization.

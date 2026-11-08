@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 #  VPN Panel — Update Script
-#  Pulls latest code, rebuilds, and restarts the panel
+#  Pulls latest code from GitHub, rebuilds/updates, and restarts the panel
 # =============================================================================
 set -euo pipefail
 
@@ -19,6 +19,8 @@ FRONTEND_DIR="${PANEL_DIR}/public"
 DATA_DIR="${PANEL_DIR}/data"
 SERVICE_NAME="vpn-panel"
 BACKUP_DIR="/opt/vpn-panel-backups"
+REPO_URL="https://github.com/soulripper13/vpn-panel.git"
+TARBALL_URL="https://github.com/soulripper13/vpn-panel/archive/refs/heads/main.tar.gz"
 
 info()    { echo -e "${CYAN}[INFO]${NC}  $*"; }
 success() { echo -e "${GREEN}[OK]${NC}    $*"; }
@@ -39,6 +41,20 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_DIR="$(dirname "$SCRIPT_DIR")"
 
 header "VPN Panel Updater"
+
+# If run directly on installed panel without local git clone, download latest GitHub release
+CLEANUP_TMP=false
+if [[ "${SOURCE_DIR}" == "${PANEL_DIR}" || ! -d "${SOURCE_DIR}/.git" ]]; then
+    info "Fetching latest release package from GitHub..."
+    TMP_DIR="/tmp/vpn-panel-update-$(date +%s)"
+    mkdir -p "${TMP_DIR}"
+    curl -fsSL --connect-timeout 15 -o "${TMP_DIR}/main.tar.gz" "${TARBALL_URL}"
+    tar -xzf "${TMP_DIR}/main.tar.gz" -C "${TMP_DIR}"
+    SOURCE_DIR="${TMP_DIR}/vpn-panel-main"
+    CLEANUP_TMP=true
+    success "Latest source downloaded."
+fi
+
 info "Source : ${SOURCE_DIR}"
 info "Target : ${PANEL_DIR}"
 
@@ -49,9 +65,10 @@ TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 BACKUP_PATH="${BACKUP_DIR}/${TIMESTAMP}"
 mkdir -p "${BACKUP_PATH}"
 
-cp -r "${BACKEND_DIR}" "${BACKUP_PATH}/backend" 2>/dev/null || warn "Could not backup backend."
-cp -r "${FRONTEND_DIR}" "${BACKUP_PATH}/public" 2>/dev/null || warn "Could not backup frontend."
-cp "${DATA_DIR}/panel.db" "${BACKUP_PATH}/panel.db" 2>/dev/null || warn "No DB to backup."
+[[ -f "${DATA_DIR}/panel.db" ]] && cp -a "${DATA_DIR}/panel.db" "${BACKUP_PATH}/panel.db" 2>/dev/null && info "Database backed up."
+[[ -f "${PANEL_DIR}/.env" ]] && cp -a "${PANEL_DIR}/.env" "${BACKUP_PATH}/.env" 2>/dev/null && info "Configuration backed up."
+[[ -d "${BACKEND_DIR}" ]] && cp -r "${BACKEND_DIR}" "${BACKUP_PATH}/backend" 2>/dev/null || warn "Could not backup backend."
+[[ -d "${FRONTEND_DIR}" ]] && cp -r "${FRONTEND_DIR}" "${BACKUP_PATH}/public" 2>/dev/null || warn "Could not backup frontend."
 
 success "Backup saved to ${BACKUP_PATH}"
 
@@ -59,17 +76,21 @@ success "Backup saved to ${BACKUP_PATH}"
 find "${BACKUP_DIR}" -maxdepth 1 -type d -mtime +7 -exec rm -rf {} + 2>/dev/null || true
 info "Old backups pruned (> 7 days)."
 
-# ── Stop service ───────────────────────────────────────────────────────────────
-header "Stopping Panel Service"
-systemctl stop "${SERVICE_NAME}" && success "Service stopped." || warn "Service was not running."
-
 # ── Deploy new backend ────────────────────────────────────────────────────────
 header "Updating Backend"
 
 if [[ -d "${SOURCE_DIR}/backend" ]]; then
-    rsync -a --delete \
-        --exclude='node_modules' \
-        "${SOURCE_DIR}/backend/" "${BACKEND_DIR}/"
+    if command -v rsync &>/dev/null; then
+        rsync -a --delete \
+            --exclude='node_modules' \
+            --exclude='.env' \
+            "${SOURCE_DIR}/backend/" "${BACKEND_DIR}/"
+    else
+        mkdir -p "${BACKEND_DIR}"
+        cp -rf "${SOURCE_DIR}/backend/src" "${BACKEND_DIR}/"
+        cp -f "${SOURCE_DIR}/backend/package.json" "${BACKEND_DIR}/"
+        [[ -d "${SOURCE_DIR}/backend/public" ]] && cp -rf "${SOURCE_DIR}/backend/public" "${BACKEND_DIR}/"
+    fi
     success "Backend files updated."
 else
     die "Backend source not found: ${SOURCE_DIR}/backend"
@@ -84,26 +105,38 @@ cd -
 # ── Deploy new frontend ───────────────────────────────────────────────────────
 header "Updating Frontend"
 
-if [[ -d "${SOURCE_DIR}/frontend/dist" ]]; then
-    rsync -a --delete "${SOURCE_DIR}/frontend/dist/" "${FRONTEND_DIR}/"
-    success "Pre-built frontend updated."
+mkdir -p "${FRONTEND_DIR}" "${BACKEND_DIR}/public"
+if [[ -d "${SOURCE_DIR}/backend/public" ]]; then
+    cp -rf "${SOURCE_DIR}/backend/public/"* "${FRONTEND_DIR}/" 2>/dev/null || true
+    cp -rf "${SOURCE_DIR}/backend/public/"* "${BACKEND_DIR}/public/" 2>/dev/null || true
+    success "Pre-built frontend deployed."
+elif [[ -d "${SOURCE_DIR}/frontend/dist" ]]; then
+    cp -rf "${SOURCE_DIR}/frontend/dist/"* "${FRONTEND_DIR}/" 2>/dev/null || true
+    cp -rf "${SOURCE_DIR}/frontend/dist/"* "${BACKEND_DIR}/public/" 2>/dev/null || true
+    success "Pre-built frontend deployed."
 elif [[ -d "${SOURCE_DIR}/frontend" ]]; then
     warn "Frontend dist not found. Building..."
     cd "${SOURCE_DIR}/frontend"
     npm install --silent
     npm run build
-    rsync -a --delete "${SOURCE_DIR}/frontend/dist/" "${FRONTEND_DIR}/"
+    cp -rf "${SOURCE_DIR}/frontend/dist/"* "${FRONTEND_DIR}/"
+    cp -rf "${SOURCE_DIR}/frontend/dist/"* "${BACKEND_DIR}/public/"
     cd -
     success "Frontend built and deployed."
 else
     warn "No frontend source found — skipping frontend update."
 fi
 
+# Clean up temp downloads if any
+if [[ "${CLEANUP_TMP}" == true ]]; then
+    rm -rf "${TMP_DIR}" 2>/dev/null || true
+fi
+
 # ── Reload systemd & restart service ──────────────────────────────────────────
 header "Restarting Service"
 
 systemctl daemon-reload
-systemctl start "${SERVICE_NAME}"
+systemctl restart "${SERVICE_NAME}"
 sleep 2
 
 if systemctl is-active --quiet "${SERVICE_NAME}"; then
@@ -111,9 +144,10 @@ if systemctl is-active --quiet "${SERVICE_NAME}"; then
 else
     error "Service failed to start after update!"
     warn "Rolling back to backup ${BACKUP_PATH}..."
-    rsync -a --delete "${BACKUP_PATH}/backend/" "${BACKEND_DIR}/" 2>/dev/null || true
-    rsync -a --delete "${BACKUP_PATH}/public/"  "${FRONTEND_DIR}/" 2>/dev/null || true
-    systemctl start "${SERVICE_NAME}" && warn "Rollback successful." || error "Rollback also failed — manual intervention required."
+    [[ -d "${BACKUP_PATH}/backend" ]] && cp -rf "${BACKUP_PATH}/backend/"* "${BACKEND_DIR}/" 2>/dev/null || true
+    [[ -d "${BACKUP_PATH}/public" ]] && cp -rf "${BACKUP_PATH}/public/"* "${FRONTEND_DIR}/" 2>/dev/null || true
+    [[ -f "${BACKUP_PATH}/panel.db" ]] && cp -a "${BACKUP_PATH}/panel.db" "${DATA_DIR}/panel.db" 2>/dev/null || true
+    systemctl start "${SERVICE_NAME}" && warn "Rollback successful." || error "Rollback failed — manual intervention required."
     die "Update failed; rollback attempted."
 fi
 

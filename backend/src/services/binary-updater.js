@@ -233,7 +233,16 @@ class BinaryUpdaterService {
     const latestXrayVer = xrayRelease?.version || '';
     const hasXrayUpdate = Boolean(latestXrayVer && curXrayVer && latestXrayVer !== curXrayVer);
 
+    let panelStatus = null;
+    try {
+      const PanelUpdaterService = require('./panel-updater');
+      panelStatus = await PanelUpdaterService.getStatus();
+    } catch (e) {
+      panelStatus = { error: e.message };
+    }
+
     return {
+      panel: panelStatus,
       singbox: {
         currentVersion: singboxStatus.version,
         latestVersion: latestSingboxVer || 'unknown',
