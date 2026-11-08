@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAuthStore } from './store/authStore'
+import { getBasePath } from './utils/api'
 import Layout from './components/layout/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
@@ -21,8 +22,7 @@ function GuestGuard({ children }) {
 }
 
 export default function App() {
-  const rawBase = typeof window !== 'undefined' ? (window.__BASE_PATH__ || '') : ''
-  const basename = (rawBase && rawBase !== '/') ? rawBase.replace(/\/$/, '') : ''
+  const basename = getBasePath()
 
   return (
     <BrowserRouter basename={basename}>

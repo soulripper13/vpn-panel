@@ -3,9 +3,21 @@ import { useAuthStore } from '../store/authStore'
 
 export const getBasePath = () => {
   if (typeof window === 'undefined') return ''
-  const bp = window.__BASE_PATH__ || ''
-  if (!bp || bp === '/') return ''
-  return bp.replace(/\/$/, '')
+  if (window.__BASE_PATH__ && window.__BASE_PATH__ !== '/') {
+    return window.__BASE_PATH__.replace(/\/$/, '')
+  }
+  // Fallback: detect base path from current pathname if first segment is not a known app route
+  const segments = (window.location.pathname || '').split('/').filter(Boolean)
+  if (segments.length > 0) {
+    const first = segments[0]
+    const knownRoutes = ['login', 'dashboard', 'inbounds', 'clients', 'settings', 'logs', 'sub', 'assets', 'api', 'ws']
+    if (!knownRoutes.includes(first)) {
+      const detected = `/${first}`
+      window.__BASE_PATH__ = detected
+      return detected
+    }
+  }
+  return ''
 }
 
 const api = axios.create({
@@ -15,8 +27,10 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
-// Attach token to every request
+// Dynamically ensure request baseURL matches active base path and attach token
 api.interceptors.request.use((config) => {
+  const bp = getBasePath()
+  config.baseURL = `${bp}/api`
   const token = useAuthStore.getState().token
   if (token) {
     config.headers.Authorization = `Bearer ${token}`

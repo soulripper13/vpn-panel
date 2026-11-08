@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { Shield, Lock, User, Eye, EyeOff } from 'lucide-react'
 import { useAuthStore } from '../store/authStore'
-import api from '../utils/api'
+import api, { getBasePath } from '../utils/api'
 import Spinner from '../components/ui/Spinner'
 import toast from 'react-hot-toast'
 
@@ -29,7 +29,8 @@ export default function Login() {
       if (res.data.success) {
         login(res.data.data.user)
         toast.success('Welcome back!')
-        window.location.href = '/dashboard'
+        const bp = getBasePath()
+        window.location.href = `${bp}/dashboard`
       }
     } catch (err) {
       toast.error(err.response?.data?.message || 'Login failed. Please check credentials.')

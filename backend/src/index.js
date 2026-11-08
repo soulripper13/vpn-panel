@@ -236,8 +236,11 @@ function getInjectedIndexHtml(basePath) {
       lastIndexMtime = stat.mtimeMs;
     }
     const cleanBase = basePath || '/';
-    const injection = `<script>window.__BASE_PATH__ = "${cleanBase}";</script>\n  `;
-    return cachedIndexHtml.replace('</head>', `${injection}</head>`);
+    const injection = `<script>window.__BASE_PATH__ = "${cleanBase}";</script>`;
+    if (cachedIndexHtml.includes('<head>')) {
+      return cachedIndexHtml.replace('<head>', `<head>\n    ${injection}`);
+    }
+    return cachedIndexHtml.replace('</head>', `    ${injection}\n  </head>`);
   } catch {
     return null;
   }
