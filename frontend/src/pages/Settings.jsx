@@ -1,8 +1,21 @@
 import React, { useState, useEffect } from 'react'
-import { Settings as SettingsIcon, Save, Key, Shield, HardDrive } from 'lucide-react'
+import {
+  Settings as SettingsIcon,
+  Save,
+  Key,
+  Shield,
+  HardDrive,
+  Download,
+  ArrowUpCircle,
+  RefreshCw,
+  ExternalLink,
+  Cpu,
+  CheckCircle2,
+} from 'lucide-react'
 import api from '../utils/api'
 import toast from 'react-hot-toast'
 import Spinner from '../components/ui/Spinner'
+import Badge from '../components/ui/Badge'
 
 export default function Settings() {
   const [settings, setSettings] = useState({
@@ -14,6 +27,11 @@ export default function Settings() {
     xray_bin: '/usr/local/x-ui/bin/xray-linux-amd64',
   })
 
+  // Binary updates state
+  const [updates, setUpdates] = useState(null)
+  const [checkingUpdates, setCheckingUpdates] = useState(false)
+  const [updatingEngine, setUpdatingEngine] = useState(null)
+
   // Password change state
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -21,6 +39,40 @@ export default function Settings() {
 
   const [loading, setLoading] = useState(false)
   const [pwLoading, setPwLoading] = useState(false)
+
+  const checkUpdates = async () => {
+    try {
+      setCheckingUpdates(true)
+      const res = await api.get('/engine/updates')
+      if (res.data?.data) {
+        setUpdates(res.data.data)
+      }
+    } catch {
+      // silently ignore or notify on manual check
+    } finally {
+      setCheckingUpdates(false)
+    }
+  }
+
+  const handleUpdateBinary = async (engine) => {
+    const title = engine === 'singbox' ? 'sing-box' : 'Xray-core'
+    if (!confirm(`Update ${title} binary in-place to the latest GitHub release? The service will be automatically restarted.`)) {
+      return
+    }
+
+    try {
+      setUpdatingEngine(engine)
+      const res = await api.post(`/engine/${engine}/update`)
+      if (res.data.success) {
+        toast.success(res.data.message || `${title} binary updated successfully!`)
+        await checkUpdates()
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || `Failed to update ${title}`)
+    } finally {
+      setUpdatingEngine(null)
+    }
+  }
 
   useEffect(() => {
     async function load() {
@@ -34,6 +86,7 @@ export default function Settings() {
           }))
         }
       } catch {}
+      checkUpdates()
     }
     load()
   }, [])
@@ -176,6 +229,136 @@ export default function Settings() {
           </button>
         </div>
       </form>
+
+      {/* Core Engine Binaries & In-Panel Updates */}
+      <div className="bg-[#1a1d27] border border-[#2d3148] rounded-xl p-6 shadow-lg space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#2d3148]">
+          <div className="flex items-center space-x-2.5">
+            <Cpu className="w-5 h-5 text-indigo-400" />
+            <div>
+              <h3 className="text-sm font-semibold text-white">Core Engine Binaries & In-Panel Updates</h3>
+              <p className="text-xs text-slate-400">Download, verify, and update sing-box and Xray binaries directly from official GitHub releases</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={checkUpdates}
+            disabled={checkingUpdates}
+            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition flex items-center space-x-1.5 w-fit"
+          >
+            {checkingUpdates ? <Spinner size="xs" /> : <RefreshCw className="w-3.5 h-3.5 text-indigo-400" />}
+            <span>Check for Updates</span>
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* sing-box update card */}
+          <div className="bg-[#14161f] border border-[#2d3148] rounded-xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <span className="font-semibold text-white text-sm">sing-box</span>
+                <Badge variant="singbox" size="xs">SagerNet</Badge>
+              </div>
+              {updates?.singbox?.hasUpdate ? (
+                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                  Update Available
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center space-x-1">
+                  <CheckCircle2 className="w-3 h-3" />
+                  <span>Up to date</span>
+                </span>
+              )}
+            </div>
+
+            <div className="space-y-1.5 text-xs font-mono">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Current Version:</span>
+                <span className="text-slate-200">{updates?.singbox?.currentVersion ? `v${updates.singbox.currentVersion}` : 'Checking...'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Latest Release:</span>
+                <span className="text-indigo-300 font-semibold">{updates?.singbox?.latestVersion ? `v${updates.singbox.latestVersion}` : 'Checking...'}</span>
+              </div>
+            </div>
+
+            <div className="pt-2 flex items-center justify-between border-t border-[#2d3148]">
+              <a
+                href={updates?.singbox?.releaseUrl || 'https://github.com/SagerNet/sing-box/releases'}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[11px] text-slate-400 hover:text-indigo-300 transition flex items-center space-x-1"
+              >
+                <span>Release Notes</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+
+              <button
+                type="button"
+                onClick={() => handleUpdateBinary('singbox')}
+                disabled={updatingEngine === 'singbox'}
+                className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-medium transition flex items-center space-x-1.5 shadow"
+              >
+                {updatingEngine === 'singbox' ? <Spinner size="xs" /> : <ArrowUpCircle className="w-3.5 h-3.5" />}
+                <span>{updatingEngine === 'singbox' ? 'Updating...' : 'Update sing-box'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Xray-core update card */}
+          <div className="bg-[#14161f] border border-[#2d3148] rounded-xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <span className="font-semibold text-white text-sm">Xray-core</span>
+                <Badge variant="xray" size="xs">XTLS</Badge>
+              </div>
+              {updates?.xray?.hasUpdate ? (
+                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                  Update Available
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center space-x-1">
+                  <CheckCircle2 className="w-3 h-3" />
+                  <span>Up to date</span>
+                </span>
+              )}
+            </div>
+
+            <div className="space-y-1.5 text-xs font-mono">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Current Version:</span>
+                <span className="text-slate-200">{updates?.xray?.currentVersion ? `v${updates.xray.currentVersion}` : 'Checking...'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Latest Release:</span>
+                <span className="text-purple-300 font-semibold">{updates?.xray?.latestVersion ? `v${updates.xray.latestVersion}` : 'Checking...'}</span>
+              </div>
+            </div>
+
+            <div className="pt-2 flex items-center justify-between border-t border-[#2d3148]">
+              <a
+                href={updates?.xray?.releaseUrl || 'https://github.com/XTLS/Xray-core/releases'}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[11px] text-slate-400 hover:text-indigo-300 transition flex items-center space-x-1"
+              >
+                <span>Release Notes</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+
+              <button
+                type="button"
+                onClick={() => handleUpdateBinary('xray')}
+                disabled={updatingEngine === 'xray'}
+                className="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-xs font-medium transition flex items-center space-x-1.5 shadow"
+              >
+                {updatingEngine === 'xray' ? <Spinner size="xs" /> : <ArrowUpCircle className="w-3.5 h-3.5" />}
+                <span>{updatingEngine === 'xray' ? 'Updating...' : 'Update Xray-core'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* Change Password Form */}
       <form onSubmit={handleChangePassword} className="bg-[#1a1d27] border border-[#2d3148] rounded-xl p-6 shadow-lg space-y-4">

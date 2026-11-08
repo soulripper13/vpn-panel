@@ -9,6 +9,7 @@ const express = require('express');
 const router = express.Router();
 const SingboxService = require('../services/singbox');
 const XrayService = require('../services/xray');
+const BinaryUpdaterService = require('../services/binary-updater');
 const { requireAuth } = require('../middleware/auth');
 
 router.use(requireAuth);
@@ -134,6 +135,47 @@ router.get('/xray/logs', async (req, res) => {
     const lines = parseInt(req.query.lines || '100', 10);
     const logs = await XrayService.getLogs(lines);
     return res.json({ success: true, data: { logs } });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ─── UPDATES & BINARY MANAGEMENT ─────────────────────────────────────────────
+
+/**
+ * GET /api/engine/updates
+ * Check for updates for both sing-box and Xray
+ */
+router.get('/updates', async (req, res) => {
+  try {
+    const data = await BinaryUpdaterService.getUpdatesStatus();
+    return res.json({ success: true, data });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/**
+ * POST /api/engine/singbox/update
+ * Update sing-box binary
+ */
+router.post('/singbox/update', async (req, res) => {
+  try {
+    const result = await BinaryUpdaterService.updateSingbox(req.body.version);
+    return res.json({ success: true, message: result.message, data: result });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/**
+ * POST /api/engine/xray/update
+ * Update Xray binary
+ */
+router.post('/xray/update', async (req, res) => {
+  try {
+    const result = await BinaryUpdaterService.updateXray(req.body.version);
+    return res.json({ success: true, message: result.message, data: result });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
   }

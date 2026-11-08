@@ -431,6 +431,33 @@ router.post('/:id/clients', async (req, res) => {
 });
 
 /**
+ * PUT /api/inbounds/clients/:clientId
+ * Update client directly by client ID
+ */
+router.put('/clients/:clientId', async (req, res) => {
+  try {
+    const clientId = parseInt(req.params.clientId, 10);
+    const existing = Client.findById(clientId);
+    if (!existing) return res.status(404).json({ success: false, message: 'Client not found' });
+
+    const inbound = Inbound.findById(existing.inbound_id);
+    Client.update(clientId, req.body);
+    if (inbound) {
+      await applyEngineConfig(inbound.engine);
+    }
+
+    const updated = Client.findById(clientId);
+    return res.json({
+      success: true,
+      message: 'Client updated successfully',
+      data: updated,
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/**
  * PUT /api/inbounds/:id/clients/:clientId
  */
 router.put('/:id/clients/:clientId', async (req, res) => {

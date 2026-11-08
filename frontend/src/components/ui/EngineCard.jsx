@@ -1,11 +1,14 @@
 import React, { useState } from 'react'
-import { Play, Square, RotateCw } from 'lucide-react'
+import { Play, Square, RotateCw, ArrowUpCircle } from 'lucide-react'
 import StatusDot from './StatusDot'
 import Badge from './Badge'
 import Spinner from './Spinner'
+import api from '../../utils/api'
+import toast from 'react-hot-toast'
 
 export default function EngineCard({ name, title, status, onAction }) {
   const [loading, setLoading] = useState(false)
+  const [updateLoading, setUpdateLoading] = useState(false)
   const isRunning = Boolean(status?.running)
 
   const handleAction = async (action) => {
@@ -14,6 +17,22 @@ export default function EngineCard({ name, title, status, onAction }) {
       await onAction(name, action)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleUpdateBinary = async () => {
+    if (!confirm(`Check GitHub and update ${title} binary to the latest release?`)) return
+    try {
+      setUpdateLoading(true)
+      const res = await api.post(`/engine/${name}/update`)
+      if (res.data.success) {
+        toast.success(res.data.message || `${title} binary updated successfully!`)
+        if (onAction) await onAction(name, 'restart')
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || `Failed to update ${name} binary`)
+    } finally {
+      setUpdateLoading(false)
     }
   }
 
@@ -36,26 +55,37 @@ export default function EngineCard({ name, title, status, onAction }) {
         </div>
 
         <div className="flex items-center space-x-2">
+          <button
+            disabled={loading || updateLoading}
+            onClick={handleUpdateBinary}
+            title={`Check and update ${title} binary from GitHub`}
+            className="p-2 rounded-lg bg-indigo-950/40 hover:bg-indigo-900/50 text-indigo-300 transition border border-indigo-800/40 flex items-center justify-center"
+          >
+            {updateLoading ? <Spinner size="sm" /> : <ArrowUpCircle className="w-4 h-4 text-indigo-400" />}
+          </button>
+
           {isRunning ? (
             <>
               <button
-                disabled={loading}
+                disabled={loading || updateLoading}
                 onClick={() => handleAction('restart')}
-                className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 transition border border-slate-700 flex items-center justify-center title='Restart'"
+                className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 transition border border-slate-700 flex items-center justify-center"
+                title="Restart Service"
               >
                 {loading ? <Spinner size="sm" /> : <RotateCw className="w-4 h-4 text-indigo-400" />}
               </button>
               <button
-                disabled={loading}
+                disabled={loading || updateLoading}
                 onClick={() => handleAction('stop')}
-                className="p-2 rounded-lg bg-rose-950/40 hover:bg-rose-900/50 text-rose-300 transition border border-rose-800/40 flex items-center justify-center title='Stop'"
+                className="p-2 rounded-lg bg-rose-950/40 hover:bg-rose-900/50 text-rose-300 transition border border-rose-800/40 flex items-center justify-center"
+                title="Stop Service"
               >
                 {loading ? <Spinner size="sm" /> : <Square className="w-4 h-4" />}
               </button>
             </>
           ) : (
             <button
-              disabled={loading}
+              disabled={loading || updateLoading}
               onClick={() => handleAction('start')}
               className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs transition flex items-center space-x-1.5 shadow"
             >

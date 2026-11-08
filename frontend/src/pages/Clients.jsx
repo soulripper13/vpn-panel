@@ -13,10 +13,12 @@ import {
   Shield,
   Zap,
   RefreshCw,
+  Pencil,
 } from 'lucide-react'
 import api from '../utils/api'
 import Badge from '../components/ui/Badge'
 import QRModal from '../components/modals/QRModal'
+import EditClientModal from '../components/modals/EditClientModal'
 import Spinner from '../components/ui/Spinner'
 import Toggle from '../components/ui/Toggle'
 import { formatBytes } from '../utils/format'
@@ -26,6 +28,7 @@ import toast from 'react-hot-toast'
 export default function Clients() {
   const [search, setSearch] = useState('')
   const [activeQR, setActiveQR] = useState(null)
+  const [editingClient, setEditingClient] = useState(null)
   const [copiedEmail, setCopiedEmail] = useState(null)
   const [showAddModal, setShowAddModal] = useState(false)
 
@@ -289,6 +292,13 @@ export default function Clients() {
                     <td className="px-5 py-4 text-right">
                       <div className="flex items-center justify-end space-x-2">
                         <button
+                          onClick={() => setEditingClient(c)}
+                          title="Edit Client Settings"
+                          className="p-1.5 rounded-lg bg-amber-600/15 hover:bg-amber-600/25 text-amber-300 transition"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
                           onClick={() => handleCopyLink(c)}
                           title="Copy Link"
                           className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
@@ -535,6 +545,15 @@ export default function Clients() {
           client={activeQR.client}
         />
       )}
+
+      {/* Edit Client Modal */}
+      <EditClientModal
+        isOpen={Boolean(editingClient)}
+        onClose={() => setEditingClient(null)}
+        client={editingClient}
+        inbound={inbounds?.find((i) => i.id === editingClient?.inboundId || i.id === editingClient?.inbound_id)}
+        onSuccess={() => queryClient.invalidateQueries(['inbounds'])}
+      />
     </div>
   )
 }

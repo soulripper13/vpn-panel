@@ -10,12 +10,14 @@ import {
   RotateCcw,
   Radio,
   ExternalLink,
+  Pencil,
 } from 'lucide-react'
 import { useInbounds } from '../hooks/useInbounds'
 import Badge from '../components/ui/Badge'
 import Toggle from '../components/ui/Toggle'
 import Spinner from '../components/ui/Spinner'
 import AddInboundModal from '../components/modals/AddInboundModal'
+import EditInboundModal from '../components/modals/EditInboundModal'
 import ClientModal from '../components/modals/ClientModal'
 import QRModal from '../components/modals/QRModal'
 import { formatBytes } from '../utils/format'
@@ -24,6 +26,7 @@ export default function Inbounds() {
   const [engineFilter, setEngineFilter] = useState('all')
   const [search, setSearch] = useState('')
   const [isAddOpen, setIsAddOpen] = useState(false)
+  const [editingInbound, setEditingInbound] = useState(null)
   const [clientModalInbound, setClientModalInbound] = useState(null)
   const [qrModalData, setQrModalData] = useState(null)
 
@@ -192,6 +195,14 @@ export default function Inbounds() {
                     <td className="px-5 py-4 text-right">
                       <div className="flex items-center justify-end space-x-2">
                         <button
+                          onClick={() => setEditingInbound(inb)}
+                          title="Edit Inbound Settings"
+                          className="p-1.5 rounded-lg bg-amber-600/15 hover:bg-amber-600/25 text-amber-300 transition"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+
+                        <button
                           onClick={() => setClientModalInbound(inb)}
                           title="Manage / Add Clients"
                           className="p-1.5 rounded-lg bg-indigo-600/15 hover:bg-indigo-600/25 text-indigo-300 transition"
@@ -251,6 +262,14 @@ export default function Inbounds() {
       <AddInboundModal
         isOpen={isAddOpen}
         onClose={() => setIsAddOpen(false)}
+        onSuccess={refetch}
+      />
+
+      {/* Edit Inbound Modal */}
+      <EditInboundModal
+        isOpen={Boolean(editingInbound)}
+        onClose={() => setEditingInbound(null)}
+        inbound={editingInbound}
         onSuccess={refetch}
       />
 

@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react'
-import { X, Plus, Trash2, QrCode, Copy, Check, Users, User, Key, RefreshCw, Shield, Zap } from 'lucide-react'
+import { X, Plus, Trash2, QrCode, Copy, Check, Users, User, Key, RefreshCw, Shield, Zap, Pencil } from 'lucide-react'
 import { generateUUID, generatePassword, generateHexPassword, extractSettings, extractHysteriaDetails } from '../../utils/links'
 import { formatBytes } from '../../utils/format'
 import api from '../../utils/api'
 import toast from 'react-hot-toast'
 import QRModal from './QRModal'
+import EditClientModal from './EditClientModal'
 import Toggle from '../ui/Toggle'
 import Spinner from '../ui/Spinner'
 
@@ -12,6 +13,7 @@ export default function ClientModal({ isOpen, onClose, inbound, onUpdate }) {
   const [clients, setClients] = useState(inbound?.clients || [])
   const [showAddForm, setShowAddForm] = useState(false)
   const [activeQR, setActiveQR] = useState(null)
+  const [editingClient, setEditingClient] = useState(null)
   const [copiedId, setCopiedId] = useState(null)
   const [loading, setLoading] = useState(false)
 
@@ -40,6 +42,18 @@ export default function ClientModal({ isOpen, onClose, inbound, onUpdate }) {
   }, [inbound])
 
   if (!isOpen || !inbound) return null
+
+  const refreshClients = async () => {
+    try {
+      const res = await api.get(`/inbounds/${inbound.id}/clients`)
+      if (res.data?.data) {
+        setClients(res.data.data)
+      }
+      if (onUpdate) onUpdate()
+    } catch {
+      if (onUpdate) onUpdate()
+    }
+  }
 
   const handleToggleClient = async (client) => {
     try {
@@ -246,6 +260,14 @@ export default function ClientModal({ isOpen, onClose, inbound, onUpdate }) {
                     checked={c.enable === 1}
                     onChange={() => handleToggleClient(c)}
                   />
+
+                  <button
+                    onClick={() => setEditingClient(c)}
+                    title="Edit Client Settings"
+                    className="p-1.5 rounded-lg bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 transition"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
 
                   <button
                     onClick={() => handleCopyLink(c)}
@@ -468,6 +490,15 @@ export default function ClientModal({ isOpen, onClose, inbound, onUpdate }) {
           client={activeQR.client}
         />
       )}
+
+      {/* Edit Client Modal */}
+      <EditClientModal
+        isOpen={Boolean(editingClient)}
+        onClose={() => setEditingClient(null)}
+        client={editingClient}
+        inbound={inbound}
+        onSuccess={refreshClients}
+      />
     </div>
   )
 }

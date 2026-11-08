@@ -132,18 +132,36 @@ class Inbound {
 
   /** Serialize object fields to JSON strings ready for DB insert/update. */
   static _serialize(data) {
+    let settingsJson = '{}';
+    if (typeof data.settings === 'object' && data.settings !== null) {
+      settingsJson = JSON.stringify(data.settings);
+    } else if (typeof data.settings_json === 'string') {
+      settingsJson = data.settings_json;
+    } else if (typeof data.settings === 'string') {
+      settingsJson = data.settings;
+    }
+
+    let streamSettingsJson = '{}';
+    if (typeof data.stream_settings === 'object' && data.stream_settings !== null) {
+      streamSettingsJson = JSON.stringify(data.stream_settings);
+    } else if (typeof data.stream_settings_json === 'string') {
+      streamSettingsJson = data.stream_settings_json;
+    } else if (typeof data.stream_settings === 'string') {
+      streamSettingsJson = data.stream_settings;
+    }
+
     return {
       engine:               data.engine               || 'singbox',
       tag:                  data.tag                  || '',
       type:                 data.type                 || '',
       listen:               data.listen               || '0.0.0.0',
-      port:                 data.port                 || 0,
-      protocol:             data.protocol             || '',
-      settings_json:        JSON.stringify(data.settings        || data.settings_json        || {}),
-      stream_settings_json: JSON.stringify(data.stream_settings || data.stream_settings_json || {}),
-      enabled:              data.enabled !== false ? 1 : 0,
-      total_bytes_limit:    data.total_bytes_limit    || 0,
-      expiry_time:          data.expiry_time          || 0,
+      port:                 parseInt(data.port        || 0, 10),
+      protocol:             data.protocol             || data.type || '',
+      settings_json:        settingsJson,
+      stream_settings_json: streamSettingsJson,
+      enabled:              data.enabled !== false && data.enabled !== 0 ? 1 : 0,
+      total_bytes_limit:    parseInt(data.total_bytes_limit || 0, 10),
+      expiry_time:          parseInt(data.expiry_time || 0, 10),
       remark:               data.remark               || '',
     };
   }
