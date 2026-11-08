@@ -530,8 +530,11 @@ info "Credentials configured → user: ${ADMIN_USERNAME} / pass: ${ADMIN_PASSWOR
 header "Setting Permissions"
 
 chown -R root:root "${PANEL_DIR}"
-chmod -R 750 "${PANEL_DIR}"
+chmod -R 755 "${PANEL_DIR}"
+chmod 750 "${PANEL_DIR}/data" "${PANEL_DIR}/.env" 2>/dev/null || true
 chmod 755 "${FRONTEND_DIR}"
+chmod +x "${PANEL_DIR}/deploy/"*.sh 2>/dev/null || true
+chmod +x /usr/local/bin/vpn-panel /usr/local/bin/panel /usr/bin/vpn-panel 2>/dev/null || true
 success "Permissions set."
 
 # ── Step 16: Configure firewall (optional) ───────────────────────────────────
