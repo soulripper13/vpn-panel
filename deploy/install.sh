@@ -80,6 +80,22 @@ apt-get install -y --no-install-recommends \
     2>/dev/null
 success "System packages installed."
 
+# ── Backup existing configurations (Safe Upgrade Protection) ─────────────────
+BACKUP_DIR="/opt/vpn-panel-backups/pre-install-$(date +%Y%m%d%H%M%S)"
+HAS_BACKUP=false
+
+for f in "/etc/sing-box/config.json" "/usr/local/x-ui/bin/config.json" "/etc/xray/config.json" "/etc/x-ui/x-ui.db" "/opt/vpn-panel/data/panel.db"; do
+    if [[ -f "$f" ]]; then
+        mkdir -p "${BACKUP_DIR}"
+        cp -a "$f" "${BACKUP_DIR}/"
+        HAS_BACKUP=true
+    fi
+done
+
+if [[ "$HAS_BACKUP" == true ]]; then
+    success "Existing configs safely backed up to ${BACKUP_DIR}"
+fi
+
 # ── Step 3: Interactive Configuration ─────────────────────────────────────────
 header "Interactive Setup & Customization"
 
