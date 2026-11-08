@@ -86,8 +86,11 @@ HAS_BACKUP=false
 
 for f in "/etc/sing-box/config.json" "/usr/local/x-ui/bin/config.json" "/etc/xray/config.json" "/etc/x-ui/x-ui.db" "/opt/vpn-panel/data/panel.db"; do
     if [[ -f "$f" ]]; then
-        mkdir -p "${BACKUP_DIR}"
-        cp -a "$f" "${BACKUP_DIR}/"
+        # Preserve directory hierarchy to prevent collisions with identical basenames (e.g. multiple config.json)
+        dest_dir="${BACKUP_DIR}$(dirname "$f")"
+        mkdir -p "${dest_dir}"
+        # Use -L to dereference symlinks into standalone physical backups
+        cp -aL "$f" "${dest_dir}/" 2>/dev/null || cp -f "$f" "${dest_dir}/" 2>/dev/null || true
         HAS_BACKUP=true
     fi
 done
@@ -282,7 +285,8 @@ if command -v xray &>/dev/null || [[ -f /usr/local/bin/xray ]]; then
 elif [[ -f /usr/local/x-ui/bin/xray-linux-amd64 ]]; then
     info "Migrating Xray binary to /usr/local/bin/xray (safely decoupling from x-ui)..."
     mkdir -p /usr/local/bin
-    cp -a /usr/local/x-ui/bin/xray-linux-amd64 /usr/local/bin/xray
+    rm -f /usr/local/bin/xray
+    cp -aL /usr/local/x-ui/bin/xray-linux-amd64 /usr/local/bin/xray 2>/dev/null || true
     chmod +x /usr/local/bin/xray
     XRAY_INSTALLED=true
     success "Xray migrated to /usr/local/bin/xray."
@@ -313,9 +317,15 @@ if [[ ! -f /usr/local/share/xray/geosite.dat && -f /usr/local/x-ui/bin/geosite.d
 fi
 
 # Migrate existing Xray config out of /usr/local/x-ui/bin/ into standard /etc/xray/config.json
-if [[ ! -f /etc/xray/config.json && -f /usr/local/x-ui/bin/config.json ]]; then
+if [[ -L /etc/xray/config.json ]]; then
+    target=$(readlink -f /etc/xray/config.json 2>/dev/null || true)
+    if [[ -n "$target" && -f "$target" ]]; then
+        rm -f /etc/xray/config.json
+        cp -aL "$target" /etc/xray/config.json 2>/dev/null || true
+    fi
+elif [[ ! -f /etc/xray/config.json && -f /usr/local/x-ui/bin/config.json ]]; then
     info "Migrating Xray config to /etc/xray/config.json..."
-    cp -a /usr/local/x-ui/bin/config.json /etc/xray/config.json
+    cp -aL /usr/local/x-ui/bin/config.json /etc/xray/config.json 2>/dev/null || true
 fi
 
 if [[ ! -f /etc/xray/config.json ]]; then
