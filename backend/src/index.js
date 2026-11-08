@@ -184,7 +184,7 @@ function getInjectedIndexHtml(basePath) {
 
 if (staticDir) {
   console.log(`[Static] Serving frontend from: ${staticDir}`);
-  app.use(express.static(staticDir));
+  app.use(express.static(staticDir, { index: false }));
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api') || req.path.startsWith('/ws')) {
       return next();
