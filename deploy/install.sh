@@ -449,12 +449,23 @@ npm install --production --silent
 success "Backend dependencies installed."
 cd -
 
-# ── Step 11: Install systemd service ─────────────────────────────────────────
-header "Installing Systemd Service"
+# ── Step 11: Install systemd service & CLI tool ──────────────────────────────
+header "Installing Systemd Service & CLI Tool"
 
-cp "${SCRIPT_DIR}/vpn-panel.service" "${SERVICE_FILE}"
+mkdir -p "${PANEL_DIR}/deploy"
+cp -rf "${SCRIPT_DIR}/"* "${PANEL_DIR}/deploy/" 2>/dev/null || true
+chmod +x "${PANEL_DIR}/deploy/"*.sh 2>/dev/null || true
+
+cp "${PANEL_DIR}/deploy/vpn-panel.service" "${SERVICE_FILE}" 2>/dev/null || cp "${SCRIPT_DIR}/vpn-panel.service" "${SERVICE_FILE}"
 systemctl daemon-reload
 success "Service file installed at ${SERVICE_FILE}"
+
+# Register CLI commands in PATH
+ln -sf "${PANEL_DIR}/deploy/vpn-panel.sh" /usr/local/bin/vpn-panel
+ln -sf "${PANEL_DIR}/deploy/vpn-panel.sh" /usr/bin/vpn-panel
+ln -sf "${PANEL_DIR}/deploy/vpn-panel.sh" /usr/local/bin/panel
+chmod +x /usr/local/bin/vpn-panel /usr/bin/vpn-panel /usr/local/bin/panel 2>/dev/null || true
+success "CLI tool 'vpn-panel' and 'panel' registered to PATH."
 
 # ── Step 12: Create .env config ───────────────────────────────────────────────
 header "Creating Configuration"
@@ -563,6 +574,7 @@ echo -e "${BOLD}${GREEN}║${NC}  Host/SNI  : ${GREEN}${SERVER_HOST}${NC}"
 echo -e "${BOLD}${GREEN}║${NC}  Path      : ${PURPLE:-}${WEB_BASE_PATH}${NC}"
 echo -e "${BOLD}${GREEN}║${NC}"
 echo -e "${BOLD}${GREEN}║${NC}  Config    : ${ENV_FILE}"
+echo -e "${BOLD}${GREEN}║${NC}  CLI Tool  : Type 'vpn-panel' or 'panel' anytime"
 echo -e "${BOLD}${GREEN}║${NC}  Logs      : journalctl -u vpn-panel -f"
 echo -e "${BOLD}${GREEN}╚══════════════════════════════════════════════╝${NC}"
 echo ""

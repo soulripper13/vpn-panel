@@ -127,6 +127,18 @@ else
     warn "No frontend source found — skipping frontend update."
 fi
 
+# ── Deploy deploy scripts & CLI helper ─────────────────────────────────────────
+mkdir -p "${PANEL_DIR}/deploy"
+if [[ -d "${SOURCE_DIR}/deploy" ]]; then
+    cp -rf "${SOURCE_DIR}/deploy/"* "${PANEL_DIR}/deploy/" 2>/dev/null || true
+    chmod +x "${PANEL_DIR}/deploy/"*.sh 2>/dev/null || true
+    ln -sf "${PANEL_DIR}/deploy/vpn-panel.sh" /usr/local/bin/vpn-panel
+    ln -sf "${PANEL_DIR}/deploy/vpn-panel.sh" /usr/bin/vpn-panel
+    ln -sf "${PANEL_DIR}/deploy/vpn-panel.sh" /usr/local/bin/panel
+    chmod +x /usr/local/bin/vpn-panel /usr/bin/vpn-panel /usr/local/bin/panel 2>/dev/null || true
+    info "CLI tool 'vpn-panel' updated."
+fi
+
 # Clean up temp downloads if any
 if [[ "${CLEANUP_TMP}" == true ]]; then
     rm -rf "${TMP_DIR}" 2>/dev/null || true

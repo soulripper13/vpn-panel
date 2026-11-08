@@ -7,6 +7,7 @@
 'use strict';
 
 const http = require('http');
+const https = require('https');
 const path = require('path');
 const fs = require('fs');
 const express = require('express');
@@ -35,12 +36,72 @@ const statsRouter = require('./api/stats');
 const settingsRouter = require('./api/settings');
 
 const app = express();
-const server = http.createServer(app);
 
 // Helper to determine active normalized base path
 function getActiveBasePath() {
   const raw = Settings.get('web_base_path', cfg.WEB_BASE_PATH || '');
   return Settings.normalizeBasePath(raw);
+}
+
+// Helper to load SSL certificate config if available
+function getSslConfig() {
+  const certPath = Settings.get('cert_fullchain', cfg.CERT_FULLCHAIN || '');
+  const keyPath = Settings.get('cert_privkey', cfg.CERT_PRIVKEY || '');
+  const sslMode = Settings.get('panel_ssl', 'auto'); // 'auto' | '1' | '0'
+
+  if (sslMode === '0' || sslMode === 'false' || sslMode === 'http') {
+    return null;
+  }
+
+  if (certPath && keyPath && fs.existsSync(certPath) && fs.existsSync(keyPath)) {
+    try {
+      const cert = fs.readFileSync(certPath);
+      const key = fs.readFileSync(keyPath);
+      if (cert.length > 50 && key.length > 50) {
+        return { cert, key, certPath, keyPath };
+      }
+    } catch (err) {
+      console.warn('[SSL] Could not read certificate files:', err.message);
+    }
+  }
+  return null;
+}
+
+const sslConfig = getSslConfig();
+let server;
+let isHttps = false;
+
+if (sslConfig) {
+  try {
+    server = https.createServer({ cert: sslConfig.cert, key: sslConfig.key }, app);
+    isHttps = true;
+    console.log(`[SSL] HTTPS server initialized with certificate: ${sslConfig.certPath}`);
+  } catch (err) {
+    console.error('[SSL] Failed to initialize HTTPS server, falling back to HTTP:', err.message);
+    server = http.createServer(app);
+  }
+} else {
+  server = http.createServer(app);
+}
+
+if (isHttps) {
+  // Give friendly response when client sends plain HTTP request to HTTPS port
+  server.on('clientError', (err, socket) => {
+    if (err.code === 'ECONNRESET' || !socket.writable) return;
+    try {
+      socket.end(
+        'HTTP/1.1 400 Bad Request\r\n' +
+        'Content-Type: text/html; charset=utf-8\r\n' +
+        'Connection: close\r\n\r\n' +
+        '<!DOCTYPE html><html><head><title>400 HTTPS Required</title></head>' +
+        '<body style="background:#0f1117;color:#fff;font-family:sans-serif;padding:40px;text-align:center;">' +
+        '<h2>HTTPS Connection Required</h2>' +
+        '<p>This VPN Panel is configured with SSL/TLS encryption.</p>' +
+        '<p>Please access this server using <strong style="color:#818cf8;">https://</strong> instead of http://</p>' +
+        '</body></html>\r\n'
+      );
+    } catch {}
+  });
 }
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
@@ -65,7 +126,7 @@ app.use(
     resave: false,
     saveUninitialized: false,
     cookie: {
-      secure: false, // Set to true if running over HTTPS directly
+      secure: isHttps, // Secure cookie if running over HTTPS
       httpOnly: true,
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
       sameSite: 'lax',
@@ -186,7 +247,7 @@ if (staticDir) {
   console.log(`[Static] Serving frontend from: ${staticDir}`);
   app.use(express.static(staticDir, { index: false }));
   app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/api') || req.path.startsWith('/ws')) {
+    if (req.url.startsWith('/api') || req.url.startsWith('/ws') || req.path.startsWith('/api') || req.path.includes('/api/')) {
       return next();
     }
     const basePath = getActiveBasePath();
@@ -249,11 +310,13 @@ wss.on('connection', (ws, req) => {
 
 server.listen(cfg.PANEL_PORT, '0.0.0.0', () => {
   const basePath = getActiveBasePath();
-  const displayUrl = `http://${cfg.SERVER_IP || 'localhost'}:${cfg.PANEL_PORT}${basePath || '/'}`;
+  const protocol = isHttps ? 'https' : 'http';
+  const displayUrl = `${protocol}://${cfg.SERVER_IP || 'localhost'}:${cfg.PANEL_PORT}${basePath || '/'}`;
   console.log(`====================================================`);
   console.log(`  VPN Panel Server is listening on port ${cfg.PANEL_PORT}`);
+  console.log(`  Protocol:         ${protocol.toUpperCase()} (${isHttps ? 'TLS Encrypted' : 'Plain Text'})`);
   console.log(`  Panel Access URL: ${displayUrl}`);
-  console.log(`  Environment: ${cfg.NODE_ENV}`);
+  console.log(`  Environment:      ${cfg.NODE_ENV}`);
   console.log(`  Sing-box Service: ${cfg.SINGBOX_SERVICE}`);
   console.log(`  Xray Service:     ${cfg.XRAY_SERVICE}`);
   console.log(`====================================================`);

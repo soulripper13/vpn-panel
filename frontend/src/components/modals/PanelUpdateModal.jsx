@@ -183,11 +183,11 @@ export default function PanelUpdateModal({ isOpen, onClose, panelInfo, onFinishe
               <p className="text-xs text-slate-400">
                 Updating from{' '}
                 <span className="font-mono text-slate-300">
-                  {panelInfo?.currentShortCommit || panelInfo?.currentVersion || 'current'}
+                  v{panelInfo?.currentVersion || '1.2.0'}
                 </span>{' '}
                 to{' '}
                 <span className="font-mono text-indigo-300 font-semibold">
-                  {panelInfo?.latestShortCommit || panelInfo?.latestVersion || 'latest'}
+                  v{panelInfo?.latestVersion || 'latest'}
                 </span>
               </p>
             </div>

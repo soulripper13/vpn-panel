@@ -1,8 +1,8 @@
 /**
  * services/panel-updater.js
- * Checks GitHub for panel updates, downloads latest release/commit code,
- * safely backs up current databases/settings, updates backend/frontend files,
- * updates dependencies, and restarts the vpn-panel service with live progress streaming.
+ * Checks GitHub for panel updates based on official semantic release numbers (tags/releases),
+ * downloads release packages, safely backs up databases and settings, updates application files,
+ * updates production dependencies, and restarts the vpn-panel service.
  */
 
 'use strict';
@@ -39,6 +39,22 @@ function addLog(msg) {
   if (updateState.logs.length > 300) {
     updateState.logs.shift();
   }
+}
+
+/**
+ * Compare two semver strings: v1 > v2 returns 1, v1 < v2 returns -1, equal returns 0
+ */
+function compareSemver(v1, v2) {
+  const parse = (v) => (v || '').replace(/^v/, '').split('.').map((x) => parseInt(x, 10) || 0);
+  const p1 = parse(v1);
+  const p2 = parse(v2);
+  for (let i = 0; i < Math.max(p1.length, p2.length); i++) {
+    const a = p1[i] || 0;
+    const b = p2[i] || 0;
+    if (a > b) return 1;
+    if (a < b) return -1;
+  }
+  return 0;
 }
 
 /**
@@ -100,15 +116,15 @@ class PanelUpdaterService {
   }
 
   /**
-   * Get current panel version and commit hash
+   * Get current panel version
    */
   static getCurrentVersion() {
-    let version = '1.0.0';
-    let commit = '4b7c11b';
-    let shortCommit = '4b7c11b';
+    let version = '1.2.0';
+    let commit = '';
+    let shortCommit = '';
     let buildDate = new Date().toISOString().split('T')[0];
 
-    // Try reading package.json
+    // Read package.json
     try {
       const pkgPath = path.join(__dirname, '../../package.json');
       if (fs.existsSync(pkgPath)) {
@@ -117,7 +133,7 @@ class PanelUpdaterService {
       }
     } catch {}
 
-    // Try reading version.json
+    // Read version.json
     try {
       const verPath = path.join(__dirname, '../../version.json');
       if (fs.existsSync(verPath)) {
@@ -131,19 +147,6 @@ class PanelUpdaterService {
       }
     } catch {}
 
-    // If git is available in panelDir, read current git commit
-    try {
-      const panelDir = PanelUpdaterService.getPanelDir();
-      if (fs.existsSync(path.join(panelDir, '.git'))) {
-        const { stdout } = execSync('git rev-parse HEAD', { cwd: panelDir, stdio: ['pipe', 'pipe', 'ignore'] });
-        const gitSha = stdout.toString().trim();
-        if (gitSha) {
-          commit = gitSha;
-          shortCommit = gitSha.substring(0, 7);
-        }
-      }
-    } catch {}
-
     return {
       version,
       commit,
@@ -153,7 +156,7 @@ class PanelUpdaterService {
   }
 
   /**
-   * Check latest release or commit from GitHub
+   * Check latest official release from GitHub (soulripper13/vpn-panel)
    */
   static async checkPanelRelease(force = false) {
     const now = Date.now();
@@ -163,47 +166,63 @@ class PanelUpdaterService {
 
     const repoOwner = 'soulripper13';
     const repoName = 'vpn-panel';
-    const commitsUrl = `https://api.github.com/repos/${repoOwner}/${repoName}/commits/main`;
-    const releasesUrl = `https://api.github.com/repos/${repoOwner}/${repoName}/releases/latest`;
+    const releasesLatestUrl = `https://api.github.com/repos/${repoOwner}/${repoName}/releases/latest`;
+    const releasesListUrl = `https://api.github.com/repos/${repoOwner}/${repoName}/releases`;
+    const tagsUrl = `https://api.github.com/repos/${repoOwner}/${repoName}/tags`;
 
-    let latestCommit = null;
-    let latestRelease = null;
+    let release = null;
 
+    // 1. Try releases/latest
     try {
-      latestCommit = await fetchJson(commitsUrl);
+      release = await fetchJson(releasesLatestUrl);
     } catch (e) {
-      // Fallback via curl
       try {
-        const { stdout } = await execAsync(`curl -sL --connect-timeout 5 -H "User-Agent: vpn-panel" "${commitsUrl}"`);
-        latestCommit = JSON.parse(stdout);
+        const { stdout } = await execAsync(`curl -sL --connect-timeout 5 -H "User-Agent: vpn-panel" "${releasesLatestUrl}"`);
+        release = JSON.parse(stdout);
+        if (release && release.message && release.message.includes('Not Found')) {
+          release = null;
+        }
       } catch {}
     }
 
-    try {
-      latestRelease = await fetchJson(releasesUrl);
-    } catch {}
+    // 2. Fallback to releases list
+    if (!release || !release.tag_name) {
+      try {
+        const list = await fetchJson(releasesListUrl);
+        if (Array.isArray(list) && list.length > 0) {
+          release = list[0];
+        }
+      } catch {}
+    }
 
-    const sha = latestCommit?.sha || '';
-    const shortSha = sha ? sha.substring(0, 7) : '';
-    const commitMsg = latestCommit?.commit?.message
-      ? latestCommit.commit.message.split('\n')[0]
-      : 'Latest updates';
-    const commitDate = latestCommit?.commit?.committer?.date || latestCommit?.commit?.author?.date || '';
-    const author = latestCommit?.commit?.author?.name || 'soulripper13';
+    // 3. Fallback to tags list
+    let tagItem = null;
+    if (!release || !release.tag_name) {
+      try {
+        const tags = await fetchJson(tagsUrl);
+        if (Array.isArray(tags) && tags.length > 0) {
+          tagItem = tags[0];
+        }
+      } catch {}
+    }
 
-    const latestVer = latestRelease?.tag_name
-      ? latestRelease.tag_name.replace(/^v/, '')
-      : '1.1.0';
+    const rawTag = release?.tag_name || tagItem?.name || 'v1.2.0';
+    const latestVersion = rawTag.replace(/^v/, '');
+    const releaseName = release?.name || rawTag;
+    const releaseNotes = release?.body || (release ? `Release ${rawTag}` : 'Latest stable release');
+    const publishedAt = release?.published_at || (tagItem ? new Date().toISOString() : '');
+    const tarballUrl = release?.tarball_url || tagItem?.tarball_url || `https://github.com/${repoOwner}/${repoName}/archive/refs/tags/${rawTag}.tar.gz`;
+    const htmlUrl = release?.html_url || `https://github.com/${repoOwner}/${repoName}/releases`;
 
     const result = {
-      latestVersion: latestVer,
-      latestCommit: sha,
-      shortCommit: shortSha,
-      commitMessage: commitMsg,
-      commitDate,
-      author,
+      latestVersion,
+      tagName: rawTag,
+      releaseName,
+      releaseNotes,
+      publishedAt,
+      tarballUrl,
+      htmlUrl,
       releaseUrl: `https://github.com/${repoOwner}/${repoName}`,
-      htmlUrl: latestCommit?.html_url || `https://github.com/${repoOwner}/${repoName}`,
     };
 
     releaseCache = { data: result, timestamp: now };
@@ -211,7 +230,7 @@ class PanelUpdaterService {
   }
 
   /**
-   * Get updates status for the panel
+   * Get updates status for the panel based on semantic versioning
    */
   static async getStatus(force = false) {
     const current = PanelUpdaterService.getCurrentVersion();
@@ -224,22 +243,18 @@ class PanelUpdaterService {
       error = e.message;
     }
 
-    let hasUpdate = false;
-    if (release && release.shortCommit && current.shortCommit) {
-      hasUpdate = release.shortCommit !== current.shortCommit;
-    }
+    const latestVer = release?.latestVersion || current.version;
+    const hasUpdate = Boolean(release && compareSemver(latestVer, current.version) > 0);
 
     return {
       currentVersion: current.version,
-      currentCommit: current.commit,
-      currentShortCommit: current.shortCommit,
-      latestVersion: release?.latestVersion || current.version,
-      latestCommit: release?.latestCommit || '',
-      latestShortCommit: release?.shortCommit || '',
-      latestCommitMessage: release?.commitMessage || '',
-      latestCommitDate: release?.commitDate || '',
+      latestVersion: latestVer,
+      tagName: release?.tagName || `v${latestVer}`,
+      releaseName: release?.releaseName || `v${latestVer}`,
+      releaseNotes: release?.releaseNotes || '',
+      publishedAt: release?.publishedAt || '',
       hasUpdate,
-      releaseUrl: release?.releaseUrl || 'https://github.com/soulripper13/vpn-panel',
+      releaseUrl: release?.htmlUrl || 'https://github.com/soulripper13/vpn-panel/releases',
       error,
       updateInProgress: updateState.status === 'running' || updateState.status === 'restarting',
     };
@@ -256,9 +271,9 @@ class PanelUpdaterService {
   }
 
   /**
-   * Initiate panel self-update
+   * Initiate panel self-update to latest release
    */
-  static async updatePanel() {
+  static async updatePanel(targetVersion = null) {
     if (updateState.status === 'running' || updateState.status === 'restarting') {
       throw new Error('A panel update is already in progress');
     }
@@ -277,7 +292,7 @@ class PanelUpdaterService {
     addLog('Starting VPN Panel self-update pipeline...');
 
     // Asynchronously execute update without blocking HTTP response
-    PanelUpdaterService._executePipeline().catch((err) => {
+    PanelUpdaterService._executePipeline(targetVersion).catch((err) => {
       updateState.status = 'failed';
       updateState.error = err.message;
       updateState.finishedAt = Date.now();
@@ -295,7 +310,7 @@ class PanelUpdaterService {
    * Asynchronous pipeline execution
    * @private
    */
-  static async _executePipeline() {
+  static async _executePipeline(targetVersion = null) {
     const panelDir = PanelUpdaterService.getPanelDir();
     const backupBaseDir = '/opt/vpn-panel-backups';
     const timestamp = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 14);
@@ -326,10 +341,31 @@ class PanelUpdaterService {
       // ── Step 2: Download latest release archive from GitHub (progress: 35%) ─
       updateState.step = 'download';
       updateState.progress = 35;
-      const archiveUrl = 'https://github.com/soulripper13/vpn-panel/archive/refs/heads/main.tar.gz';
-      addLog(`Downloading latest release archive from GitHub (${archiveUrl})...`);
 
-      await execAsync(`curl -fsSL --connect-timeout 15 -o "${tarballPath}" "${archiveUrl}"`);
+      const releaseInfo = await PanelUpdaterService.checkPanelRelease(true);
+      const tagToDownload = targetVersion ? `v${targetVersion.replace(/^v/, '')}` : (releaseInfo?.tagName || 'main');
+      let archiveUrl = releaseInfo?.tarballUrl;
+      if (!archiveUrl || targetVersion) {
+        archiveUrl = `https://github.com/soulripper13/vpn-panel/archive/refs/tags/${tagToDownload}.tar.gz`;
+      }
+
+      addLog(`Downloading release package ${tagToDownload} from GitHub (${archiveUrl})...`);
+
+      // Try tag download, fallback to main branch if tag not ready yet
+      let downloadOk = false;
+      try {
+        await execAsync(`curl -fsSL --connect-timeout 15 -o "${tarballPath}" "${archiveUrl}"`);
+        if (fs.existsSync(tarballPath) && fs.statSync(tarballPath).size > 1024) {
+          downloadOk = true;
+        }
+      } catch {}
+
+      if (!downloadOk) {
+        archiveUrl = 'https://github.com/soulripper13/vpn-panel/archive/refs/heads/main.tar.gz';
+        addLog(`Tag archive unavailable, falling back to main release branch (${archiveUrl})...`);
+        await execAsync(`curl -fsSL --connect-timeout 15 -o "${tarballPath}" "${archiveUrl}"`);
+      }
+
       if (!fs.existsSync(tarballPath) || fs.statSync(tarballPath).size < 1024) {
         throw new Error('Downloaded archive is missing or corrupted.');
       }
@@ -341,11 +377,18 @@ class PanelUpdaterService {
       addLog('Extracting update package...');
       await execAsync(`mkdir -p "${tempDir}" && tar -xzf "${tarballPath}" -C "${tempDir}"`);
 
-      const extractedRoot = path.join(tempDir, 'vpn-panel-main');
+      // Find extracted root directory dynamically (e.g. vpn-panel-1.2.0 or vpn-panel-main)
+      const extractedEntries = fs.readdirSync(tempDir);
+      const extractedDirName = extractedEntries.find((d) => d.startsWith('vpn-panel') && fs.statSync(path.join(tempDir, d)).isDirectory());
+      if (!extractedDirName) {
+        throw new Error('Invalid archive structure: root directory not found.');
+      }
+      const extractedRoot = path.join(tempDir, extractedDirName);
+
       if (!fs.existsSync(path.join(extractedRoot, 'backend'))) {
         throw new Error('Invalid archive structure: backend directory not found in release.');
       }
-      addLog('Archive extracted and verified.');
+      addLog(`Archive extracted and verified (${extractedDirName}).`);
 
       // ── Step 4: Deploy files (progress: 70%) ──────────────────────────────
       updateState.step = 'deploy_files';
@@ -380,21 +423,16 @@ class PanelUpdaterService {
         await execAsync(`chmod +x "${targetDeploy}"/*.sh 2>/dev/null || true`);
       }
 
-      // Record latest commit into version.json
-      let latestCommitSha = '';
-      try {
-        const release = await PanelUpdaterService.checkPanelRelease(true);
-        latestCommitSha = release?.latestCommit || '';
-        const versionJson = {
-          version: release?.latestVersion || '1.1.0',
-          commit: latestCommitSha,
-          shortCommit: latestCommitSha.slice(0, 7),
-          buildDate: new Date().toISOString(),
-        };
-        fs.writeFileSync(path.join(targetBackend, 'version.json'), JSON.stringify(versionJson, null, 2));
-      } catch {}
+      // Record updated version into version.json
+      const newVersion = releaseInfo?.latestVersion || targetVersion || '1.2.0';
+      const versionJson = {
+        version: newVersion,
+        tagName: `v${newVersion}`,
+        buildDate: new Date().toISOString(),
+      };
+      fs.writeFileSync(path.join(targetBackend, 'version.json'), JSON.stringify(versionJson, null, 2));
 
-      addLog('All updated application files deployed.');
+      addLog(`All updated application files deployed (v${newVersion}).`);
 
       // ── Step 5: Install/update backend dependencies (progress: 85%) ────────
       updateState.step = 'dependencies';
@@ -422,7 +460,7 @@ class PanelUpdaterService {
       updateState.progress = 100;
       updateState.status = 'restarting';
       updateState.finishedAt = Date.now();
-      addLog('Panel updated successfully!');
+      addLog(`Panel updated successfully to v${newVersion}!`);
       addLog('Scheduling service restart in 2 seconds...');
 
       // Schedule restart

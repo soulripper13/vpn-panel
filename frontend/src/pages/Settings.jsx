@@ -331,20 +331,18 @@ export default function Settings() {
                 <div className="flex justify-between">
                   <span className="text-slate-500">Current:</span>
                   <span className="text-slate-200">
-                    v{updates?.panel?.currentVersion || '1.1.0'}
-                    {updates?.panel?.currentShortCommit ? ` (${updates.panel.currentShortCommit})` : ''}
+                    v{updates?.panel?.currentVersion || '1.2.0'}
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Latest Git:</span>
+                  <span className="text-slate-500">Latest Release:</span>
                   <span className="text-indigo-300 font-semibold">
-                    v{updates?.panel?.latestVersion || '1.1.0'}
-                    {updates?.panel?.latestShortCommit ? ` (${updates.panel.latestShortCommit})` : ''}
+                    v{updates?.panel?.latestVersion || '1.2.0'}
                   </span>
                 </div>
-                {updates?.panel?.latestCommitMessage && (
-                  <div className="pt-1 text-[11px] text-slate-400 font-sans line-clamp-1 italic" title={updates.panel.latestCommitMessage}>
-                    "{updates.panel.latestCommitMessage}"
+                {(updates?.panel?.releaseName || updates?.panel?.releaseNotes) && (
+                  <div className="pt-1 text-[11px] text-slate-400 font-sans line-clamp-1 italic" title={updates.panel.releaseNotes}>
+                    "{updates.panel.releaseName || updates.panel.releaseNotes}"
                   </div>
                 )}
               </div>
@@ -352,12 +350,12 @@ export default function Settings() {
 
             <div className="pt-2 flex items-center justify-between border-t border-[#2d3148]">
               <a
-                href={updates?.panel?.releaseUrl || 'https://github.com/soulripper13/vpn-panel'}
+                href={updates?.panel?.releaseUrl || 'https://github.com/soulripper13/vpn-panel/releases'}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-[11px] text-slate-400 hover:text-indigo-300 transition flex items-center space-x-1"
               >
-                <span>GitHub Repo</span>
+                <span>Releases</span>
                 <ExternalLink className="w-3 h-3" />
               </a>
 
@@ -367,7 +365,7 @@ export default function Settings() {
                 className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium transition flex items-center space-x-1.5 shadow"
               >
                 <ArrowUpCircle className="w-3.5 h-3.5" />
-                <span>Update Panel</span>
+                <span>{updates?.panel?.hasUpdate ? `Update to v${updates.panel.latestVersion}` : 'Update Panel'}</span>
               </button>
             </div>
           </div>
