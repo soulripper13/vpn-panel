@@ -116,8 +116,9 @@ function generateClientLink(inbound, client, host) {
   const type = (inbound.type || '').toLowerCase();
   const protocol = (inbound.protocol || type).toLowerCase();
 
-  // 1. ShadowTLS + Shadowsocks
-  if (type === 'shadowtls' || protocol === 'shadowtls') {
+  // 1. ShadowTLS + Shadowsocks (or shadowsocks with shadow-tls plugin)
+  const isStls = type === 'shadowtls' || protocol === 'shadowtls' || settings.plugin === 'shadow-tls' || Boolean(settings.shadowtlsPassword);
+  if (isStls) {
     const stlsPassword = client.password || settings.shadowtlsPassword || settings.password || '';
     const sni = settings.serverName || settings.sni || 'gateway.icloud.com';
     const ssMethod = settings.ssMethod || settings.method || '2022-blake3-aes-128-gcm';
@@ -126,15 +127,23 @@ function generateClientLink(inbound, client, host) {
 
     const userinfo = toBase64(`${ssMethod}:${ssPassword}`);
     // Standard SIP002 shadow-tls plugin format (Shadowrocket / NekoBox / Clash Meta)
+    // Note: NEVER include a slash between port and ?plugin=, as Shadowrocket regex requires ss://user:pass@host:port?plugin=...
     const pluginParam = `shadow-tls%3Bhost%3D${encodeURIComponent(sni)}%3Bpassword%3D${encodeURIComponent(stlsPassword)}%3Bversion%3D${version}`;
-    return `ss://${userinfo}@${host}:${port}/?plugin=${pluginParam}#${urlEncode(remark)}`;
+    return `ss://${userinfo}@${host}:${port}?plugin=${pluginParam}#${urlEncode(remark)}`;
   }
 
-  // 2. Shadowsocks standard
+  // 2. Shadowsocks standard or generic plugin
   if (type === 'shadowsocks' || protocol === 'shadowsocks') {
     const method = settings.method || 'aes-128-gcm';
     const password = client.password || settings.password || '';
     const userinfo = toBase64(`${method}:${password}`);
+    if (settings.plugin) {
+      let pluginParam = encodeURIComponent(settings.plugin);
+      if (settings.pluginOpts) {
+        pluginParam += `%3B${encodeURIComponent(settings.pluginOpts)}`;
+      }
+      return `ss://${userinfo}@${host}:${port}?plugin=${pluginParam}#${urlEncode(remark)}`;
+    }
     return `ss://${userinfo}@${host}:${port}#${urlEncode(remark)}`;
   }
 
@@ -271,8 +280,8 @@ function generateClashConfig(inbound, client, host) {
   const type = (inbound.type || '').toLowerCase();
   const protocol = (inbound.protocol || type).toLowerCase();
 
-  // ShadowTLS
-  if (type === 'shadowtls' || protocol === 'shadowtls') {
+  // ShadowTLS (or Shadowsocks + shadow-tls plugin)
+  if (type === 'shadowtls' || protocol === 'shadowtls' || settings.plugin === 'shadow-tls' || Boolean(settings.shadowtlsPassword)) {
     const stlsPassword = client.password || settings.shadowtlsPassword || settings.password || '';
     const sni = settings.serverName || settings.sni || 'gateway.icloud.com';
     const ssMethod = settings.ssMethod || settings.method || '2022-blake3-aes-128-gcm';
@@ -394,8 +403,8 @@ function generateSingboxConfig(inbound, client, host) {
   const type = (inbound.type || '').toLowerCase();
   const protocol = (inbound.protocol || type).toLowerCase();
 
-  // ShadowTLS
-  if (type === 'shadowtls' || protocol === 'shadowtls') {
+  // ShadowTLS (or Shadowsocks + shadow-tls plugin)
+  if (type === 'shadowtls' || protocol === 'shadowtls' || settings.plugin === 'shadow-tls' || Boolean(settings.shadowtlsPassword)) {
     const stlsPassword = client.password || settings.shadowtlsPassword || settings.password || '';
     const sni = settings.serverName || settings.sni || 'gateway.icloud.com';
     const ssMethod = settings.ssMethod || settings.method || '2022-blake3-aes-128-gcm';

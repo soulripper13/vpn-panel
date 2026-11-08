@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
   X,
   Check,
@@ -94,21 +94,21 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess }) {
 
   // 4. Protocol Specifics
   const [ssMethod, setSsMethod] = useState('2022-blake3-aes-128-gcm')
-  const [ssPassword, setSsPassword] = useState('n2+xP7UC266h4wBRVp6pEg==')
-  const [shadowtlsPassword, setShadowtlsPassword] = useState(generateHexPassword(16))
-  const [password, setPassword] = useState(generatePassword(16))
+  const [ssPassword, setSsPassword] = useState(() => generateBase64Key(16))
+  const [shadowtlsPassword, setShadowtlsPassword] = useState(() => generateHexPassword(16))
+  const [password, setPassword] = useState(() => generatePassword(16))
   const [shadowtlsVersion, setShadowtlsVersion] = useState(3)
   const [upMbps, setUpMbps] = useState(100)
   const [downMbps, setDownMbps] = useState(100)
   const [obfsEnabled, setObfsEnabled] = useState(true)
-  const [obfsPassword, setObfsPassword] = useState(generatePassword(8))
+  const [obfsPassword, setObfsPassword] = useState(() => generatePassword(8))
   const [udpHopEnabled, setUdpHopEnabled] = useState(true)
   const [udpHopPorts, setUdpHopPorts] = useState('20000-50000')
   const [hopInterval, setHopInterval] = useState('5-10')
-  const [certPreset, setCertPreset] = useState('domain')
-  const [certificateFile, setCertificateFile] = useState('/root/cert/bb88.soulripper13.online/fullchain.pem')
-  const [keyFile, setKeyFile] = useState('/root/cert/bb88.soulripper13.online/privkey.pem')
-  const [clientAuth, setClientAuth] = useState(generatePassword(16))
+  const [certPreset, setCertPreset] = useState('settings')
+  const [certificateFile, setCertificateFile] = useState('')
+  const [keyFile, setKeyFile] = useState('')
+  const [clientAuth, setClientAuth] = useState(() => generatePassword(16))
   const [tuicCongestion, setTuicCongestion] = useState('bbr')
 
   // 5. Client & Flow
@@ -119,24 +119,44 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess }) {
   // 6. Sniffing
   const [sniffing, setSniffing] = useState(true)
 
+  useEffect(() => {
+    if (isOpen) {
+      // Load configured certificates dynamically from settings API
+      api.get('/settings').then((res) => {
+        if (res.data?.data) {
+          if (res.data.data.cert_fullchain) setCertificateFile(res.data.data.cert_fullchain)
+          if (res.data.data.cert_privkey) setKeyFile(res.data.data.cert_privkey)
+        }
+      }).catch(() => {})
+    }
+  }, [isOpen])
+
   if (!isOpen) return null
 
   const handleCertPresetChange = (preset) => {
     setCertPreset(preset)
-    if (preset === 'domain') {
-      setServerName('bb88.soulripper13.online')
-      setCertificateFile('/root/cert/bb88.soulripper13.online/fullchain.pem')
-      setKeyFile('/root/cert/bb88.soulripper13.online/privkey.pem')
-    } else if (preset === 'ip') {
-      setServerName('107.182.23.115')
-      setCertificateFile('/root/cert/ip/fullchain.pem')
-      setKeyFile('/root/cert/ip/privkey.pem')
+    const currentHost = window.location.hostname || ''
+    if (preset === 'settings') {
+      api.get('/settings').then((res) => {
+        if (res.data?.data) {
+          if (res.data.data.cert_fullchain) setCertificateFile(res.data.data.cert_fullchain)
+          if (res.data.data.cert_privkey) setKeyFile(res.data.data.cert_privkey)
+        }
+      }).catch(() => {})
+      setServerName(currentHost)
+    } else if (preset === 'letsencrypt') {
+      setServerName(currentHost)
+      setCertificateFile(`/etc/letsencrypt/live/${currentHost}/fullchain.pem`)
+      setKeyFile(`/etc/letsencrypt/live/${currentHost}/privkey.pem`)
+    } else if (preset === 'custom') {
+      // Keep existing or clear
     }
   }
 
   const handleProtocolSelect = (protoType) => {
     setSelectedProtocol(protoType)
     setRemark(`${engine}-${protoType}-${port}`)
+    const currentHost = window.location.hostname || ''
 
     if (protoType === 'shadowtls') {
       setSecurity('none')
@@ -153,11 +173,9 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess }) {
       generateRealityKeys()
     } else if (protoType === 'hysteria2') {
       setSecurity('tls')
-      setServerName('bb88.soulripper13.online')
+      setServerName(currentHost)
       setAlpn('h3,h2,http/1.1')
-      setCertPreset('domain')
-      setCertificateFile('/root/cert/bb88.soulripper13.online/fullchain.pem')
-      setKeyFile('/root/cert/bb88.soulripper13.online/privkey.pem')
+      setCertPreset('settings')
       setUdpHopEnabled(true)
       setUdpHopPorts('20000-50000')
       setHopInterval('5-10')
@@ -166,10 +184,10 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess }) {
       setClientAuth(generatePassword(16))
     } else if (protoType === 'tuic') {
       setSecurity('tls')
-      setServerName('107.182.23.115')
+      setServerName(currentHost)
     } else if (protoType === 'trojan') {
       setSecurity('tls')
-      setServerName('107.182.23.115')
+      setServerName(currentHost)
     } else if (protoType === 'vmess') {
       setTransport('ws')
       setWsPath('/vmess-ws')
@@ -650,7 +668,7 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess }) {
                         type="text"
                         value={serverName}
                         onChange={(e) => setServerName(e.target.value)}
-                        placeholder="107.182.23.115 or mydomain.com"
+                        placeholder="example.com or server IP"
                         className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
                       />
                     </div>
@@ -802,7 +820,7 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess }) {
                         type="text"
                         value={ssPassword}
                         onChange={(e) => setSsPassword(e.target.value)}
-                        placeholder="n2+xP7UC266h4wBRVp6pEg=="
+                        placeholder="Base64 16-byte key"
                         className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-purple-500"
                       />
                     </div>
@@ -961,28 +979,39 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess }) {
                   {/* 3. TLS Certificates & SNI */}
                   <div className="p-3 bg-[#1a1d27] border border-[#2d3148] rounded-xl space-y-2">
                     <label className="text-xs font-medium text-slate-200 block">TLS Certificate & Server Domain</label>
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
                       <button
                         type="button"
-                        onClick={() => handleCertPresetChange('domain')}
+                        onClick={() => handleCertPresetChange('settings')}
                         className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition ${
-                          certPreset === 'domain'
+                          certPreset === 'settings'
                             ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/50'
                             : 'bg-slate-800 text-slate-400 border-slate-700'
                         }`}
                       >
-                        Domain (bb88.soulripper13.online)
+                        Panel Settings Cert
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleCertPresetChange('ip')}
+                        onClick={() => handleCertPresetChange('letsencrypt')}
                         className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition ${
-                          certPreset === 'ip'
+                          certPreset === 'letsencrypt'
                             ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/50'
                             : 'bg-slate-800 text-slate-400 border-slate-700'
                         }`}
                       >
-                        IP Cert (107.182.23.115)
+                        Let's Encrypt Default
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleCertPresetChange('custom')}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition ${
+                          certPreset === 'custom'
+                            ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/50'
+                            : 'bg-slate-800 text-slate-400 border-slate-700'
+                        }`}
+                      >
+                        Custom Paths
                       </button>
                     </div>
 

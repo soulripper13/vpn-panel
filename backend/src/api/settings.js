@@ -18,6 +18,10 @@ router.use(requireAuth);
 router.get('/', (req, res) => {
   try {
     const all = Settings.getAll();
+    if (!all.server_ip) {
+      const host = req.headers['x-forwarded-host'] || req.headers.host || '';
+      all.server_ip = host.split(':')[0] || '';
+    }
     return res.json({
       success: true,
       data: all,

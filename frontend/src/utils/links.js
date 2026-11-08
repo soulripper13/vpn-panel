@@ -119,6 +119,8 @@ export function extractHysteriaDetails(inbound, settings, streamSettings, host) 
 
 /**
  * Generate ShadowTLS + Shadowsocks share link (standard SIP002 format)
+ * Note: Never place a slash between port and ?plugin=, as Shadowrocket and other clients
+ * require ss://userinfo@host:port?plugin=...
  */
 export function generateShadowtlsLink({
   host,
@@ -129,10 +131,13 @@ export function generateShadowtlsLink({
   sni = 'gateway.icloud.com',
   version = 3,
   remark = 'MegaFon-ShadowTLS',
+  raw = false,
 }) {
   const userinfo = btoa(`${method}:${ssPassword}`)
-  const pluginParam = `shadow-tls%3Bhost%3D${encodeURIComponent(sni)}%3Bpassword%3D${encodeURIComponent(shadowtlsPassword)}%3Bversion%3D${version}`
-  return `ss://${userinfo}@${host}:${port}/?plugin=${pluginParam}#${encodeURIComponent(remark)}`
+  const pluginParam = raw
+    ? `shadow-tls;host=${sni};password=${shadowtlsPassword};version=${version}`
+    : `shadow-tls%3Bhost%3D${encodeURIComponent(sni)}%3Bpassword%3D${encodeURIComponent(shadowtlsPassword)}%3Bversion%3D${version}`
+  return `ss://${userinfo}@${host}:${port}?plugin=${pluginParam}#${encodeURIComponent(remark)}`
 }
 
 /**
@@ -176,8 +181,14 @@ export function generateVmessLink({ uuid, host, port, path = '/', tls = 'tls', r
 /**
  * Generate Shadowsocks share link
  */
-export function generateSsLink({ method, password, host, port, remark }) {
+export function generateSsLink({ method, password, host, port, plugin, pluginOpts, remark, raw = false }) {
   const userInfo = btoa(`${method}:${password}`)
+  if (plugin) {
+    let pluginParam = raw
+      ? `${plugin}${pluginOpts ? ';' + pluginOpts : ''}`
+      : `${encodeURIComponent(plugin)}${pluginOpts ? '%3B' + encodeURIComponent(pluginOpts) : ''}`
+    return `ss://${userInfo}@${host}:${port}?plugin=${pluginParam}#${encodeURIComponent(remark || 'VPN')}`
+  }
   return `ss://${userInfo}@${host}:${port}#${encodeURIComponent(remark || 'VPN')}`
 }
 
@@ -245,7 +256,8 @@ export function generateClashYaml(inbound, client, host) {
   const type = (inbound.type || '').toLowerCase()
   const protocol = (inbound.protocol || type).toLowerCase()
 
-  if (type === 'shadowtls' || protocol === 'shadowtls') {
+  const isStls = type === 'shadowtls' || protocol === 'shadowtls' || settings?.plugin === 'shadow-tls' || Boolean(settings?.shadowtlsPassword)
+  if (isStls) {
     const stlsPassword = client?.password || settings.shadowtlsPassword || settings.password || ''
     const sni = settings.serverName || settings.sni || 'gateway.icloud.com'
     const ssMethod = settings.ssMethod || settings.method || '2022-blake3-aes-128-gcm'
@@ -364,7 +376,8 @@ export function generateSingboxJson(inbound, client, host) {
   const type = (inbound.type || '').toLowerCase()
   const protocol = (inbound.protocol || type).toLowerCase()
 
-  if (type === 'shadowtls' || protocol === 'shadowtls') {
+  const isStls = type === 'shadowtls' || protocol === 'shadowtls' || settings?.plugin === 'shadow-tls' || Boolean(settings?.shadowtlsPassword)
+  if (isStls) {
     const stlsPassword = client?.password || settings.shadowtlsPassword || settings.password || ''
     const sni = settings.serverName || settings.sni || 'gateway.icloud.com'
     const ssMethod = settings.ssMethod || settings.method || '2022-blake3-aes-128-gcm'

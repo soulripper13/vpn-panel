@@ -20,7 +20,7 @@ export default function ClientModal({ isOpen, onClose, inbound, onUpdate }) {
   const isVless = inbound?.type === 'vless' || inbound?.protocol === 'vless'
   const isVmess = inbound?.type === 'vmess' || inbound?.protocol === 'vmess'
   const isHysteria = inbound?.type === 'hysteria' || inbound?.type === 'hysteria2' || inbound?.protocol === 'hysteria' || inbound?.protocol === 'hysteria2'
-  const hy2Details = isHysteria ? extractHysteriaDetails(inbound, settings, streamSettings, window.location.hostname || '107.182.23.115') : null
+  const hy2Details = isHysteria ? extractHysteriaDetails(inbound, settings, streamSettings, window.location.hostname || '') : null
 
   // New client form state
   const [newEmail, setNewEmail] = useState('')
@@ -176,7 +176,7 @@ export default function ClientModal({ isOpen, onClose, inbound, onUpdate }) {
               <div className="bg-[#14161f] p-1.5 rounded border border-[#2d3148]">
                 <span className="text-slate-500 block text-[10px]">SNI (Cert)</span>
                 <span className="text-indigo-300 truncate block">
-                  {hy2Details?.sni || '107.182.23.115'}
+                  {hy2Details?.sni || window.location.hostname || 'Server'}
                 </span>
               </div>
               <div className="bg-[#14161f] p-1.5 rounded border border-[#2d3148]">

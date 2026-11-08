@@ -23,7 +23,8 @@ try {
 
 // ─── Panel ────────────────────────────────────────────────────────────────────
 const PANEL_PORT    = parseInt(process.env.PANEL_PORT || '2096', 10);
-const SESSION_SECRET = process.env.SESSION_SECRET || 'change-me-in-production-271026';
+const crypto        = require('crypto');
+const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 
 // ─── Sing-box ─────────────────────────────────────────────────────────────────
 const SINGBOX_BIN        = process.env.SINGBOX_BIN        || '/usr/bin/sing-box';
@@ -40,9 +41,25 @@ const XRAY_LOG_LINES  = parseInt(process.env.XRAY_LOG_LINES || '200', 10);
 // Xray process name used when searching /proc or ps
 const XRAY_PROCESS_NAME = 'xray-linux-amd64';
 
-// ─── TLS certificates ─────────────────────────────────────────────────────────
-const CERT_FULLCHAIN = process.env.CERT_FULLCHAIN || '/root/cert/ip/fullchain.pem';
-const CERT_PRIVKEY   = process.env.CERT_PRIVKEY   || '/root/cert/ip/privkey.pem';
+// ─── TLS certificates (detect existing certificate if available) ─────────────
+function detectCert(type) {
+  if (type === 'fullchain') {
+    if (process.env.CERT_FULLCHAIN) return process.env.CERT_FULLCHAIN;
+    if (fs.existsSync('/root/cert/ip/fullchain.pem')) return '/root/cert/ip/fullchain.pem';
+    if (fs.existsSync('/etc/ssl/certs/ssl-cert-snakeoil.pem')) return '/etc/ssl/certs/ssl-cert-snakeoil.pem';
+    return '';
+  }
+  if (type === 'privkey') {
+    if (process.env.CERT_PRIVKEY) return process.env.CERT_PRIVKEY;
+    if (fs.existsSync('/root/cert/ip/privkey.pem')) return '/root/cert/ip/privkey.pem';
+    if (fs.existsSync('/etc/ssl/private/ssl-cert-snakeoil.key')) return '/etc/ssl/private/ssl-cert-snakeoil.key';
+    return '';
+  }
+  return '';
+}
+
+const CERT_FULLCHAIN = detectCert('fullchain');
+const CERT_PRIVKEY   = detectCert('privkey');
 
 // ─── Database ─────────────────────────────────────────────────────────────────
 const defaultDbPath = fs.existsSync('/opt/vpn-panel/data/panel.db')

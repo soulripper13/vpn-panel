@@ -7,6 +7,7 @@
 'use strict';
 
 const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
 const cfg = require('../config/app-config');
 
 /**
@@ -117,7 +118,7 @@ function generateSingboxInbound(type, opts = {}) {
     case 'shadowtls':
       const stlsTag = tag;
       const ssTag = detour || `${tag}-ss`;
-      const ssKey = opts.ssPassword || opts.password || 'n2+xP7UC266h4wBRVp6pEg==';
+      const ssKey = opts.ssPassword || opts.password || crypto.randomBytes(16).toString('base64');
       const ssMethod = opts.ssMethod || method || '2022-blake3-aes-128-gcm';
       const sni = serverName || opts.sni || 'gateway.icloud.com';
       const stlsVer = parseInt(shadowtlsVersion || opts.version || 3, 10);
@@ -128,7 +129,7 @@ function generateSingboxInbound(type, opts = {}) {
             password: u.password || shadowtlsPassword || opts.password,
           }))
         : [{
-            password: shadowtlsPassword || opts.password || '06bd7e3dde5046b436be6e8553a2baef',
+            password: shadowtlsPassword || opts.password || crypto.randomBytes(16).toString('hex'),
           }];
 
       const stlsInbound = {
@@ -217,9 +218,9 @@ function generateSingboxInbound(type, opts = {}) {
         })),
         tls: {
           enabled: true,
-          server_name: serverName || '127.0.0.1',
-          certificate_path: cfg.CERT_FULLCHAIN,
-          key_path: cfg.CERT_PRIVKEY,
+          server_name: serverName || opts.sni || opts.listen || 'localhost',
+          certificate_path: opts.certificate_path || cfg.CERT_FULLCHAIN,
+          key_path: opts.key_path || cfg.CERT_PRIVKEY,
         },
       };
 
@@ -235,10 +236,10 @@ function generateSingboxInbound(type, opts = {}) {
         zero_rtt_handshake: Boolean(zero_rtt_handshake),
         tls: {
           enabled: true,
-          server_name: serverName || '127.0.0.1',
+          server_name: serverName || opts.sni || opts.listen || 'localhost',
           alpn: ['h3'],
-          certificate_path: cfg.CERT_FULLCHAIN,
-          key_path: cfg.CERT_PRIVKEY,
+          certificate_path: opts.certificate_path || cfg.CERT_FULLCHAIN,
+          key_path: opts.key_path || cfg.CERT_PRIVKEY,
         },
       };
 
@@ -501,7 +502,7 @@ function generateXrayInbound(type, opts = {}) {
           hy2StreamSettings.tlsSettings = {
             ...(hy2StreamSettings.tlsSettings || {}),
             alpn: ['h3', 'h2', 'http/1.1'],
-            serverName: serverName || opts.sni || 'bb88.soulripper13.online',
+            serverName: serverName || opts.sni || opts.listen || '',
             certificates: [
               {
                 certificateFile: opts.certificateFile || rawStreamSettings.certificateFile || cfg.CERT_FULLCHAIN,
@@ -513,7 +514,7 @@ function generateXrayInbound(type, opts = {}) {
       } else {
         const certFile = opts.certificateFile || cfg.CERT_FULLCHAIN;
         const keyFile = opts.keyFile || cfg.CERT_PRIVKEY;
-        const sniName = serverName || opts.sni || 'bb88.soulripper13.online';
+        const sniName = serverName || opts.sni || opts.listen || '';
 
         hy2StreamSettings = {
           network: 'hysteria',

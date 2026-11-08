@@ -6,10 +6,10 @@ import Spinner from '../components/ui/Spinner'
 
 export default function Settings() {
   const [settings, setSettings] = useState({
-    server_ip: '107.182.23.115',
+    server_ip: typeof window !== 'undefined' ? (window.location.hostname || '') : '',
     panel_port: '2096',
-    cert_fullchain: '/root/cert/ip/fullchain.pem',
-    cert_privkey: '/root/cert/ip/privkey.pem',
+    cert_fullchain: '',
+    cert_privkey: '',
     singbox_bin: '/usr/bin/sing-box',
     xray_bin: '/usr/local/x-ui/bin/xray-linux-amd64',
   })
@@ -27,7 +27,11 @@ export default function Settings() {
       try {
         const res = await api.get('/settings')
         if (res.data.data) {
-          setSettings((prev) => ({ ...prev, ...res.data.data }))
+          setSettings((prev) => ({
+            ...prev,
+            ...res.data.data,
+            server_ip: res.data.data.server_ip || prev.server_ip,
+          }))
         }
       } catch {}
     }
