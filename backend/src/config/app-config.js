@@ -27,19 +27,38 @@ const crypto        = require('crypto');
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 
 // ─── Sing-box ─────────────────────────────────────────────────────────────────
-const SINGBOX_BIN        = process.env.SINGBOX_BIN        || '/usr/bin/sing-box';
+function detectSingboxBin() {
+  if (process.env.SINGBOX_BIN) return process.env.SINGBOX_BIN;
+  if (fs.existsSync('/usr/bin/sing-box')) return '/usr/bin/sing-box';
+  if (fs.existsSync('/usr/local/bin/sing-box')) return '/usr/local/bin/sing-box';
+  return '/usr/bin/sing-box';
+}
+const SINGBOX_BIN        = detectSingboxBin();
 const SINGBOX_CONFIG     = process.env.SINGBOX_CONFIG     || '/etc/sing-box/config.json';
 const SINGBOX_SERVICE    = process.env.SINGBOX_SERVICE    || 'sing-box';   // systemd unit name
 const SINGBOX_LOG_LINES  = parseInt(process.env.SINGBOX_LOG_LINES || '200', 10);
 
 // ─── Xray ─────────────────────────────────────────────────────────────────────
-const XRAY_BIN        = process.env.XRAY_BIN        || '/usr/local/x-ui/bin/xray-linux-amd64';
-const XRAY_CONFIG     = process.env.XRAY_CONFIG     || '/usr/local/x-ui/bin/config.json';
+function detectXrayBin() {
+  if (process.env.XRAY_BIN) return process.env.XRAY_BIN;
+  if (fs.existsSync('/usr/local/bin/xray')) return '/usr/local/bin/xray';
+  if (fs.existsSync('/usr/local/x-ui/bin/xray-linux-amd64')) return '/usr/local/x-ui/bin/xray-linux-amd64';
+  if (fs.existsSync('/usr/bin/xray')) return '/usr/bin/xray';
+  return '/usr/local/bin/xray';
+}
+function detectXrayConfig() {
+  if (process.env.XRAY_CONFIG) return process.env.XRAY_CONFIG;
+  if (fs.existsSync('/usr/local/x-ui/bin/config.json')) return '/usr/local/x-ui/bin/config.json';
+  if (fs.existsSync('/etc/xray/config.json')) return '/etc/xray/config.json';
+  return '/usr/local/x-ui/bin/config.json';
+}
+const XRAY_BIN        = detectXrayBin();
+const XRAY_CONFIG     = detectXrayConfig();
 const XRAY_SERVICE    = process.env.XRAY_SERVICE    || 'xray';            // systemd unit name
 const XRAY_API_PORT   = parseInt(process.env.XRAY_API_PORT || '62789', 10);
 const XRAY_LOG_LINES  = parseInt(process.env.XRAY_LOG_LINES || '200', 10);
 // Xray process name used when searching /proc or ps
-const XRAY_PROCESS_NAME = 'xray-linux-amd64';
+const XRAY_PROCESS_NAME = 'xray';
 
 // ─── TLS certificates (detect existing certificate if available) ─────────────
 function detectCert(type) {

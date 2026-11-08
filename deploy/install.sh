@@ -76,11 +76,169 @@ header "Installing System Dependencies"
 apt-get update -qq
 apt-get install -y --no-install-recommends \
     curl wget ca-certificates gnupg lsb-release \
-    tar gzip sqlite3 openssl ufw \
+    tar gzip unzip sqlite3 openssl ufw iptables jq git \
     2>/dev/null
 success "System packages installed."
 
-# ── Step 3: Install Node.js 20 ────────────────────────────────────────────────
+# ── Step 3: Enable TCP BBR Congestion Control ─────────────────────────────────
+header "Enabling TCP BBR Congestion Control"
+
+if ! grep -q "net.ipv4.tcp_congestion_control=bbr" /etc/sysctl.conf 2>/dev/null; then
+    echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
+    echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
+    sysctl -p >/dev/null 2>&1 || true
+    success "TCP BBR enabled."
+else
+    success "TCP BBR is already enabled."
+fi
+
+# ── Step 4: Install sing-box Core ─────────────────────────────────────────────
+header "Checking / Installing sing-box Core"
+
+SINGBOX_INSTALLED=false
+if command -v sing-box &>/dev/null || [[ -f /usr/bin/sing-box ]] || [[ -f /usr/local/bin/sing-box ]]; then
+    SINGBOX_INSTALLED=true
+    success "sing-box already installed: $(command -v sing-box || echo /usr/bin/sing-box)"
+else
+    info "Installing sing-box..."
+    mkdir -p /etc/apt/keyrings
+    curl -fsSL https://sing-box.app/gpg.key -o /etc/apt/keyrings/sagernet.asc 2>/dev/null || true
+    chmod 644 /etc/apt/keyrings/sagernet.asc 2>/dev/null || true
+    echo "deb [signed-by=/etc/apt/keyrings/sagernet.asc] https://deb.sagernet.org/ * *" > /etc/apt/sources.list.d/sagernet.list
+    apt-get update -qq 2>/dev/null || true
+    apt-get install -y sing-box 2>/dev/null && SINGBOX_INSTALLED=true
+
+    if [[ "$SINGBOX_INSTALLED" == false ]] || ! command -v sing-box &>/dev/null; then
+        info "Falling back to official GitHub release binary for sing-box..."
+        SB_VER=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
+        ARCH=$(dpkg --print-architecture 2>/dev/null || echo "amd64")
+        curl -Lo /tmp/sing-box.tar.gz "https://github.com/SagerNet/sing-box/releases/download/v${SB_VER}/sing-box-${SB_VER}-linux-${ARCH}.tar.gz"
+        tar -xzf /tmp/sing-box.tar.gz -C /tmp/
+        mv /tmp/sing-box-${SB_VER}-linux-${ARCH}/sing-box /usr/bin/sing-box
+        chmod +x /usr/bin/sing-box
+        rm -rf /tmp/sing-box*
+        success "sing-box v${SB_VER} installed from GitHub."
+    fi
+fi
+
+# Ensure sing-box symlink in /usr/local/bin
+if [[ -f /usr/bin/sing-box && ! -f /usr/local/bin/sing-box ]]; then
+    ln -sf /usr/bin/sing-box /usr/local/bin/sing-box
+fi
+
+# Ensure /etc/sing-box/config.json exists
+mkdir -p /etc/sing-box
+if [[ ! -f /etc/sing-box/config.json ]]; then
+    cat > /etc/sing-box/config.json <<EOF
+{
+  "log": { "level": "info", "timestamp": true },
+  "inbounds": [],
+  "outbounds": [{ "type": "direct", "tag": "direct" }]
+}
+EOF
+fi
+
+# Ensure sing-box systemd service exists & is enabled
+if [[ ! -f /etc/systemd/system/sing-box.service && ! -f /lib/systemd/system/sing-box.service ]]; then
+    cat > /etc/systemd/system/sing-box.service <<EOF
+[Unit]
+Description=sing-box service
+Documentation=https://sing-box.sagernet.org
+After=network.target nss-lookup.target
+
+[Service]
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+ExecStart=/usr/bin/sing-box run -c /etc/sing-box/config.json
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=infinity
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+fi
+systemctl enable sing-box 2>/dev/null || true
+systemctl start sing-box 2>/dev/null || true
+success "sing-box service enabled."
+
+# ── Step 5: Install Xray Core ─────────────────────────────────────────────────
+header "Checking / Installing Xray Core"
+
+XRAY_INSTALLED=false
+if command -v xray &>/dev/null || [[ -f /usr/local/bin/xray ]] || [[ -f /usr/local/x-ui/bin/xray-linux-amd64 ]]; then
+    XRAY_INSTALLED=true
+    success "Xray already installed: $(command -v xray || echo /usr/local/bin/xray)"
+else
+    info "Installing Xray core from official GitHub release..."
+    XRAY_VER=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
+    ARCH=$(dpkg --print-architecture 2>/dev/null || echo "64")
+    [[ "$ARCH" == "amd64" ]] && ARCH="64"
+    [[ "$ARCH" == "arm64" ]] && ARCH="arm64-v8a"
+    curl -Lo /tmp/xray.zip "https://github.com/XTLS/Xray-core/releases/download/v${XRAY_VER}/Xray-linux-${ARCH}.zip"
+    mkdir -p /usr/local/bin /usr/local/share/xray /usr/local/x-ui/bin /etc/xray /tmp/xray-extracted
+    unzip -qo /tmp/xray.zip -d /tmp/xray-extracted
+    mv /tmp/xray-extracted/xray /usr/local/bin/xray
+    mv /tmp/xray-extracted/geoip.dat /usr/local/share/xray/ 2>/dev/null || true
+    mv /tmp/xray-extracted/geosite.dat /usr/local/share/xray/ 2>/dev/null || true
+    chmod +x /usr/local/bin/xray
+    rm -rf /tmp/xray*
+    success "Xray v${XRAY_VER} installed from GitHub."
+fi
+
+# Ensure compatibility symlinks
+mkdir -p /usr/local/x-ui/bin /usr/local/bin
+if [[ -f /usr/local/bin/xray && ! -f /usr/local/x-ui/bin/xray-linux-amd64 ]]; then
+    ln -sf /usr/local/bin/xray /usr/local/x-ui/bin/xray-linux-amd64
+fi
+if [[ -f /usr/local/x-ui/bin/xray-linux-amd64 && ! -f /usr/local/bin/xray ]]; then
+    ln -sf /usr/local/x-ui/bin/xray-linux-amd64 /usr/local/bin/xray
+fi
+if [[ -f /usr/local/bin/xray && ! -f /usr/bin/xray ]]; then
+    ln -sf /usr/local/bin/xray /usr/bin/xray
+fi
+
+# Ensure config file exists
+if [[ ! -f /usr/local/x-ui/bin/config.json && ! -f /etc/xray/config.json ]]; then
+    cat > /usr/local/x-ui/bin/config.json <<EOF
+{
+  "log": { "loglevel": "info" },
+  "inbounds": [],
+  "outbounds": [{ "protocol": "freedom", "tag": "direct" }]
+}
+EOF
+fi
+
+# Ensure xray systemd service exists & is enabled
+if [[ ! -f /etc/systemd/system/xray.service && ! -f /lib/systemd/system/xray.service ]]; then
+    cat > /etc/systemd/system/xray.service <<EOF
+[Unit]
+Description=Xray Service
+Documentation=https://github.com/xtls
+After=network.target nss-lookup.target
+
+[Service]
+User=root
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+ExecStart=/usr/local/bin/xray run -config /usr/local/x-ui/bin/config.json
+Restart=on-failure
+RestartPreventExitStatus=23
+LimitNPROC=10000
+LimitNOFILE=1000000
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+fi
+systemctl enable xray 2>/dev/null || true
+systemctl start xray 2>/dev/null || true
+success "xray service enabled."
+
+# ── Step 6: Install Node.js 20 ────────────────────────────────────────────────
 header "Installing Node.js ${NODE_VERSION}"
 
 if node --version 2>/dev/null | grep -q "^v${NODE_VERSION}\."; then
@@ -94,36 +252,42 @@ fi
 
 info "npm version: $(npm --version)"
 
-# ── Step 4: Stop & disable x-ui ──────────────────────────────────────────────
-header "Replacing x-ui Panel"
+# ── Step 7: Stop & disable conflicting x-ui panel ─────────────────────────────
+header "Checking for Conflicting Services"
 
 if systemctl is-active --quiet x-ui 2>/dev/null; then
-    info "Stopping x-ui.service..."
+    info "Stopping conflicting x-ui.service..."
     systemctl stop x-ui
     success "x-ui stopped."
-else
-    info "x-ui is not running (skipping stop)."
 fi
 
 if systemctl is-enabled --quiet x-ui 2>/dev/null; then
-    info "Disabling x-ui.service..."
+    info "Disabling conflicting x-ui.service..."
     systemctl disable x-ui
     success "x-ui disabled."
-else
-    info "x-ui is not enabled (skipping disable)."
 fi
 
-# ── Step 5: Create directory structure ───────────────────────────────────────
+# ── Step 8: Create directory structure ───────────────────────────────────────
 header "Creating Directory Structure"
 
 mkdir -p "${BACKEND_DIR}" "${FRONTEND_DIR}" "${DATA_DIR}"
 info "Created: ${PANEL_DIR}"
 
-# ── Step 6: Deploy panel files ────────────────────────────────────────────────
+# ── Step 9: Deploy panel files ────────────────────────────────────────────────
 header "Deploying Panel Files"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_DIR="$(dirname "$SCRIPT_DIR")"
+
+# If run directly via curl pipe (e.g. bash <(curl -Ls ...))
+if [[ ! -d "${SOURCE_DIR}/backend" ]]; then
+    info "Running from remote pipe — cloning repository from GitHub..."
+    TMP_CLONE="/tmp/vpn-panel-repo"
+    rm -rf "${TMP_CLONE}"
+    git clone https://github.com/soulripper13/vpn-panel.git "${TMP_CLONE}"
+    SOURCE_DIR="${TMP_CLONE}"
+    SCRIPT_DIR="${SOURCE_DIR}/deploy"
+fi
 
 # Backend
 if [[ -d "${SOURCE_DIR}/backend" ]]; then
@@ -151,7 +315,7 @@ else
     die "Frontend source directory not found: ${SOURCE_DIR}/frontend"
 fi
 
-# ── Step 7: Install backend dependencies ─────────────────────────────────────
+# ── Step 10: Install backend dependencies ────────────────────────────────────
 header "Installing Backend Dependencies"
 
 cd "${BACKEND_DIR}"
@@ -160,14 +324,14 @@ npm install --production --silent
 success "Backend dependencies installed."
 cd -
 
-# ── Step 8: Install systemd service ──────────────────────────────────────────
+# ── Step 11: Install systemd service ─────────────────────────────────────────
 header "Installing Systemd Service"
 
 cp "${SCRIPT_DIR}/vpn-panel.service" "${SERVICE_FILE}"
 systemctl daemon-reload
 success "Service file installed at ${SERVICE_FILE}"
 
-# ── Step 9: Create .env config ────────────────────────────────────────────────
+# ── Step 12: Create .env config ───────────────────────────────────────────────
 header "Creating Configuration"
 
 SESSION_SECRET=$(openssl rand -hex 32)
@@ -194,7 +358,7 @@ EOF
 chmod 600 "${ENV_FILE}"
 success ".env written to ${ENV_FILE}"
 
-# ── Step 10: Initialize SQLite database ──────────────────────────────────────
+# ── Step 13: Initialize SQLite database ─────────────────────────────────────
 header "Initializing Database"
 
 DB_PATH="${DATA_DIR}/panel.db"
@@ -243,7 +407,7 @@ chmod 600 "${DB_PATH}"
 success "Database initialized at ${DB_PATH}"
 info "Default credentials → user: ${DEFAULT_ADMIN_USER} / pass: ${DEFAULT_ADMIN_PASS}"
 
-# ── Step 11: Set ownership & permissions ─────────────────────────────────────
+# ── Step 14: Set ownership & permissions ────────────────────────────────────
 header "Setting Permissions"
 
 chown -R root:root "${PANEL_DIR}"
@@ -251,7 +415,7 @@ chmod -R 750 "${PANEL_DIR}"
 chmod 755 "${FRONTEND_DIR}"
 success "Permissions set."
 
-# ── Step 12: Configure firewall (optional) ────────────────────────────────────
+# ── Step 15: Configure firewall (optional) ───────────────────────────────────
 header "Firewall Configuration"
 
 if command -v ufw &>/dev/null; then
@@ -266,7 +430,7 @@ else
     info "UFW not installed — skipping firewall configuration."
 fi
 
-# ── Step 13: Start service ────────────────────────────────────────────────────
+# ── Step 16: Start service ───────────────────────────────────────────────────
 header "Starting VPN Panel Service"
 
 systemctl enable "${SERVICE_NAME}"
