@@ -37,6 +37,18 @@ function getServerHost(req) {
 }
 
 /**
+ * Helper to determine base URL for public subscriptions
+ */
+function getBaseSubUrl(req) {
+  const host = getServerHost(req);
+  const proto = req.protocol || 'http';
+  const reqHost = req.get('host') || '';
+  const port = reqHost.includes(':') ? reqHost.split(':')[1] : '';
+  const portSuffix = port ? `:${port}` : '';
+  return `${proto}://${host}${portSuffix}`;
+}
+
+/**
  * Apply configuration to the respective engine
  */
 async function applyEngineConfig(engine) {
@@ -62,6 +74,7 @@ router.get('/', (req, res) => {
   const inbounds = Inbound.findAll({ engine });
 
   const host = getServerHost(req);
+  const baseSubUrl = getBaseSubUrl(req);
 
   const results = inbounds.map((inb) => {
     const clients = Client.findByInbound(inb.id);
@@ -71,6 +84,7 @@ router.get('/', (req, res) => {
       clashYaml: generateClashConfig(inb, c, host),
       singboxJson: generateSingboxConfig(inb, c, host),
       hy2Config: generateHysteriaCliConfig(inb, c, host),
+      subUrl: `${baseSubUrl}/api/sub/${encodeURIComponent(c.uuid || c.email || c.id)}`,
     }));
 
     return {
@@ -131,12 +145,14 @@ router.get('/:id', (req, res) => {
   }
 
   const host = getServerHost(req);
+  const baseSubUrl = getBaseSubUrl(req);
   const clients = Client.findByInbound(inbound.id).map((c) => ({
     ...c,
     link: generateClientLink(inbound, c, host),
     clashYaml: generateClashConfig(inbound, c, host),
     singboxJson: generateSingboxConfig(inbound, c, host),
     hy2Config: generateHysteriaCliConfig(inbound, c, host),
+    subUrl: `${baseSubUrl}/api/sub/${encodeURIComponent(c.uuid || c.email || c.id)}`,
   }));
 
   return res.json({
@@ -336,12 +352,14 @@ router.get('/:id/clients', (req, res) => {
   }
 
   const host = getServerHost(req);
+  const baseSubUrl = getBaseSubUrl(req);
   const clients = Client.findByInbound(inbound.id).map((c) => ({
     ...c,
     link: generateClientLink(inbound, c, host),
     clashYaml: generateClashConfig(inbound, c, host),
     singboxJson: generateSingboxConfig(inbound, c, host),
     hy2Config: generateHysteriaCliConfig(inbound, c, host),
+    subUrl: `${baseSubUrl}/api/sub/${encodeURIComponent(c.uuid || c.email || c.id)}`,
   }));
 
   return res.json({

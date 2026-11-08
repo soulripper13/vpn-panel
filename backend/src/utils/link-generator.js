@@ -271,9 +271,9 @@ function generateClientLink(inbound, client, host) {
 }
 
 /**
- * Generate OpenClash / Clash Meta YAML proxy block
+ * Generate OpenClash / Clash Meta proxy object { name, yaml }
  */
-function generateClashConfig(inbound, client, host) {
+function generateClashProxy(inbound, client, host) {
   const remark = client.remark || client.email || inbound.remark || `${inbound.type}-${inbound.port}`;
   const port = inbound.port;
   const { settings, streamSettings } = extractSettings(inbound);
@@ -288,8 +288,9 @@ function generateClashConfig(inbound, client, host) {
     const ssPassword = settings.ssPassword || settings.password || '';
     const version = settings.shadowtlsVersion || settings.version || 3;
 
-    return `proxies:
-  - name: "${remark}"
+    return {
+      name: remark,
+      yaml: `  - name: "${remark}"
     type: ss
     server: ${host}
     port: ${port}
@@ -300,7 +301,8 @@ function generateClashConfig(inbound, client, host) {
     plugin-opts:
       host: "${sni}"
       password: "${stlsPassword}"
-      version: ${version}`;
+      version: ${version}`,
+    };
   }
 
   // VLESS Reality
@@ -314,8 +316,9 @@ function generateClashConfig(inbound, client, host) {
     const flow = client.flow || (isReality ? 'xtls-rprx-vision' : '');
 
     if (isReality) {
-      return `proxies:
-  - name: "${remark}"
+      return {
+        name: remark,
+        yaml: `  - name: "${remark}"
     type: vless
     server: ${host}
     port: ${port}
@@ -328,11 +331,13 @@ function generateClashConfig(inbound, client, host) {
     reality-opts:
       public-key: "${publicKey}"
       short-id: "${shortId}"
-    client-fingerprint: chrome`;
+    client-fingerprint: chrome`,
+      };
     }
 
-    return `proxies:
-  - name: "${remark}"
+    return {
+      name: remark,
+      yaml: `  - name: "${remark}"
     type: vless
     server: ${host}
     port: ${port}
@@ -340,7 +345,8 @@ function generateClashConfig(inbound, client, host) {
     network: ${streamSettings.network || 'tcp'}
     tls: ${streamSettings.security === 'tls'}
     udp: true
-    servername: "${sni}"`;
+    servername: "${sni}"`,
+    };
   }
 
   // Hysteria 2 (Full anti-censorship parameters for Clash Meta / Mihomo)
@@ -348,8 +354,9 @@ function generateClashConfig(inbound, client, host) {
     const auth = client.password || client.auth || settings.auth || settings.password || '';
     const hy2 = extractHysteriaDetails(inbound, settings, streamSettings, host);
 
-    return `proxies:
-  - name: "${remark}"
+    return {
+      name: remark,
+      yaml: `  - name: "${remark}"
     type: hysteria2
     server: ${host}
     port: ${port}${hy2.ports ? `\n    ports: "${hy2.ports}"\n    hop-interval: ${hy2.hopInterval || 30}` : ''}
@@ -360,37 +367,179 @@ function generateClashConfig(inbound, client, host) {
     skip-cert-verify: ${hy2.insecure ? 'true' : 'false'}${hy2.obfsPassword ? `\n    obfs: salamander\n    obfs-password: "${hy2.obfsPassword}"` : ''}
     up: "${hy2.upMbps} Mbps"
     down: "${hy2.downMbps} Mbps"
-    client-fingerprint: chrome`;
+    client-fingerprint: chrome`,
+    };
   }
 
   // Trojan
   if (type === 'trojan' || protocol === 'trojan') {
     const password = client.password || settings.password || '';
     const sni = streamSettings.tlsSettings?.serverName || streamSettings.serverName || settings.serverName || host;
-    return `proxies:
-  - name: "${remark}"
+    const net = streamSettings.network || 'tcp';
+    let yaml = `  - name: "${remark}"
     type: trojan
     server: ${host}
     port: ${port}
     password: "${password}"
+    udp: true
     sni: "${sni}"
     skip-cert-verify: true`;
+    if (net === 'ws') {
+      const wsPath = streamSettings.wsSettings?.path || streamSettings.wsPath || '/';
+      const wsHost = streamSettings.wsSettings?.headers?.Host || streamSettings.wsHost || host;
+      yaml += `\n    network: ws\n    ws-opts:\n      path: "${wsPath}"\n      headers:\n        Host: "${wsHost}"`;
+    }
+    return { name: remark, yaml };
   }
 
   // Shadowsocks
   if (type === 'shadowsocks' || protocol === 'shadowsocks') {
     const method = settings.method || 'aes-128-gcm';
     const password = client.password || settings.password || '';
-    return `proxies:
-  - name: "${remark}"
+    return {
+      name: remark,
+      yaml: `  - name: "${remark}"
     type: ss
     server: ${host}
     port: ${port}
     cipher: ${method}
-    password: "${password}"`;
+    password: "${password}"`,
+    };
   }
 
-  return `# No Clash configuration available for ${type}`;
+  // VMess
+  if (type === 'vmess' || protocol === 'vmess') {
+    const uuid = client.uuid || '';
+    const isTls = streamSettings.security === 'tls';
+    const sni = isTls ? (streamSettings.tlsSettings?.serverName || streamSettings.serverName || host) : '';
+    const net = streamSettings.network || 'ws';
+    const wsPath = streamSettings.wsSettings?.path || streamSettings.wsPath || '/';
+    const wsHost = streamSettings.wsSettings?.headers?.Host || streamSettings.wsHost || host;
+
+    let yaml = `  - name: "${remark}"
+    type: vmess
+    server: ${host}
+    port: ${port}
+    uuid: "${uuid}"
+    alterId: 0
+    cipher: auto
+    udp: true`;
+
+    if (isTls) {
+      yaml += `\n    tls: true\n    servername: "${sni}"`;
+    }
+    if (net === 'ws') {
+      yaml += `\n    network: ws\n    ws-opts:\n      path: "${wsPath}"\n      headers:\n        Host: "${wsHost}"`;
+    } else if (net === 'grpc') {
+      const serviceName = streamSettings.grpcSettings?.serviceName || streamSettings.grpcServiceName || '';
+      yaml += `\n    network: grpc\n    grpc-opts:\n      grpc-service-name: "${serviceName}"`;
+    }
+    return { name: remark, yaml };
+  }
+
+  return null;
+}
+
+/**
+ * Generate OpenClash / Clash Meta YAML proxy block
+ */
+function generateClashConfig(inbound, client, host) {
+  const proxy = generateClashProxy(inbound, client, host);
+  if (!proxy) {
+    return `# No Clash configuration available for ${inbound.type || 'unknown'}`;
+  }
+  return `proxies:\n${proxy.yaml}`;
+}
+
+/**
+ * Generate complete Clash Meta / Shadowrocket unified subscription profile
+ */
+function generateClashSubscription(proxies, profileName = 'VPN') {
+  if (!proxies || proxies.length === 0) {
+    return `# Empty subscription\nproxies: []`;
+  }
+  const proxyYaml = proxies.map((p) => p.yaml).join('\n');
+  const proxyNames = proxies.map((p) => `      - "${p.name.replace(/"/g, '\\"')}"`).join('\n');
+
+  return `# Clash Meta / Shadowrocket Unified Subscription Profile (${profileName})
+port: 7890
+socks-port: 7891
+allow-lan: false
+mode: rule
+log-level: info
+unified-delay: true
+
+proxies:
+${proxyYaml}
+
+proxy-groups:
+  - name: PROXY
+    type: select
+    proxies:
+${proxyNames}
+      - AUTO
+
+  - name: AUTO
+    type: url-test
+    url: http://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 50
+    proxies:
+${proxyNames}
+
+rules:
+  - GEOIP,LAN,DIRECT
+  - MATCH,PROXY
+`;
+}
+
+/**
+ * Generate complete Sing-box client JSON subscription
+ */
+function generateSingboxSubscription(items, host) {
+  const allOutbounds = [];
+
+  for (const item of items) {
+    const raw = generateSingboxConfig(item.inbound, item.client, host);
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed.outbounds)) {
+        for (const ob of parsed.outbounds) {
+          allOutbounds.push(ob);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  if (!allOutbounds.some((o) => o.type === 'direct')) {
+    allOutbounds.push({ type: 'direct', tag: 'direct' });
+  }
+  if (!allOutbounds.some((o) => o.type === 'block')) {
+    allOutbounds.push({ type: 'block', tag: 'block' });
+  }
+  if (!allOutbounds.some((o) => o.type === 'dns')) {
+    allOutbounds.push({ type: 'dns', tag: 'dns-out' });
+  }
+
+  return JSON.stringify({
+    log: {
+      level: 'info',
+      timestamp: true,
+    },
+    outbounds: allOutbounds,
+  }, null, 2);
+}
+
+/**
+ * Generate Base64 subscription (newline-separated protocol links)
+ */
+function generateBase64Subscription(items, host) {
+  const links = items
+    .map((item) => generateClientLink(item.inbound, item.client, host))
+    .filter(Boolean);
+  return Buffer.from(links.join('\n'), 'utf-8').toString('base64');
 }
 
 /**
@@ -588,11 +737,39 @@ async function generateQRCode(text) {
   }
 }
 
+/**
+ * Generate QR code as PNG image buffer
+ *
+ * @param {string} text Link text
+ * @returns {Promise<Buffer>} PNG Buffer
+ */
+async function generateQRCodeBuffer(text) {
+  try {
+    return await QRCode.toBuffer(text, {
+      type: 'png',
+      errorCorrectionLevel: 'M',
+      margin: 2,
+      width: 360,
+      color: {
+        dark: '#000000',
+        light: '#ffffff',
+      },
+    });
+  } catch (err) {
+    throw new Error(`Failed to generate QR code buffer: ${err.message}`);
+  }
+}
+
 module.exports = {
   extractHysteriaDetails,
   generateClientLink,
+  generateClashProxy,
   generateClashConfig,
+  generateClashSubscription,
   generateSingboxConfig,
+  generateSingboxSubscription,
+  generateBase64Subscription,
   generateHysteriaCliConfig,
   generateQRCode,
+  generateQRCodeBuffer,
 };

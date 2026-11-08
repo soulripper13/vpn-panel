@@ -22,6 +22,60 @@ class Client {
     return db.prepare(`SELECT * FROM clients WHERE email = ?`).get(email);
   }
 
+  static findByUuid(uuid) {
+    return db.prepare(`SELECT * FROM clients WHERE uuid = ?`).get(uuid);
+  }
+
+  static findAllByEmail(email) {
+    return db.prepare(`SELECT * FROM clients WHERE email = ? ORDER BY id`).all(email);
+  }
+
+  static findAllByUuid(uuid) {
+    return db.prepare(`SELECT * FROM clients WHERE uuid = ? ORDER BY id`).all(uuid);
+  }
+
+  /**
+   * Find clients matching a subscription token (UUID, email, ID, or inbound prefix)
+   * @param {string} token
+   * @returns {Array<object>}
+   */
+  static findByToken(token) {
+    if (!token) return [];
+
+    // Check for inbound prefix: "inbound-1", "inbound:1", "inbound_1"
+    const inbMatch = String(token).match(/^inbound[:_-]?(\d+)$/i);
+    if (inbMatch) {
+      const inbId = parseInt(inbMatch[1], 10);
+      return Client.findByInbound(inbId);
+    }
+
+    // Match UUID
+    const byUuid = db.prepare(`SELECT * FROM clients WHERE uuid = ?`).all(token);
+    if (byUuid && byUuid.length > 0) {
+      const primary = byUuid[0];
+      // If client has a customized non-default email, include all client records under that email
+      if (primary.email && !primary.email.startsWith('default_') && !primary.email.startsWith('client_') && !primary.email.startsWith('user_')) {
+        const byEmail = db.prepare(`SELECT * FROM clients WHERE email = ? ORDER BY id`).all(primary.email);
+        if (byEmail && byEmail.length > 1) return byEmail;
+      }
+      return byUuid;
+    }
+
+    // Match Email
+    const byEmail = db.prepare(`SELECT * FROM clients WHERE email = ? ORDER BY id`).all(token);
+    if (byEmail && byEmail.length > 0) {
+      return byEmail;
+    }
+
+    // Match numeric client ID
+    if (/^\d+$/.test(String(token))) {
+      const byId = db.prepare(`SELECT * FROM clients WHERE id = ?`).get(parseInt(token, 10));
+      if (byId) return [byId];
+    }
+
+    return [];
+  }
+
   static findAll() {
     return db.prepare(`SELECT * FROM clients ORDER BY id`).all();
   }

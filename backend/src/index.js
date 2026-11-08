@@ -27,6 +27,7 @@ const TrafficService = require('./services/traffic');
 
 // Routers
 const authRouter = require('./api/auth');
+const subscriptionRouter = require('./api/subscription');
 const inboundsRouter = require('./api/inbounds');
 const engineRouter = require('./api/engine');
 const statsRouter = require('./api/stats');
@@ -81,6 +82,8 @@ app.use('/api/auth/login', authLimiter);
 
 // ─── API Routes ───────────────────────────────────────────────────────────────
 
+app.use('/api/sub', subscriptionRouter);
+app.use('/sub', subscriptionRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/inbounds', inboundsRouter);
 app.use('/api/engine', engineRouter);
