@@ -429,7 +429,7 @@ class PanelUpdaterService {
       if (os.platform() === 'linux' && fs.existsSync('/etc/systemd/system/vpn-panel.service')) {
         const restartCmd = 'sleep 2 && systemctl daemon-reload && systemctl restart vpn-panel';
         try {
-          exec(`systemd-run --unit=vpn-panel-restart --remain-after-exit=no bash -c "${restartCmd}"`);
+          await execAsync(`systemd-run bash -c "${restartCmd}"`);
         } catch {
           const child = spawn('bash', ['-c', restartCmd], { detached: true, stdio: 'ignore' });
           child.unref();
