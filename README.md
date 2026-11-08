@@ -107,3 +107,20 @@ vpn-panel/
     ├── update.sh         # Update manager
     └── vpn-panel.service # Systemd service unit definition
 ```
+
+---
+
+## 🔄 Updates & Upgrades
+
+The panel supports one-click updates directly from the web interface or via CLI:
+
+### 1. In-Panel One-Click Updates (Recommended)
+Navigate to **Settings** → **Panel & Core Engine Updates**:
+- **VPN Panel:** Detects latest GitHub commits and releases, performs atomic database backup, updates assets, and gracefully restarts the service with live log streaming.
+- **sing-box & Xray-core:** Directly updates core binaries in-place from official upstream releases with automated syntax verification and restart.
+
+### 2. Command-Line Update
+If SSH access is preferred, run the updater script directly:
+```bash
+bash /opt/vpn-panel/deploy/update.sh
+```
