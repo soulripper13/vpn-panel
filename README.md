@@ -7,6 +7,7 @@ A unified web management dashboard inspired by 3x-ui, capable of controlling **b
 ## 🌟 Key Features
 
 - **Dual-Engine Architecture:** Run `sing-box` and `Xray-core` at the same time, managed through a single cohesive dashboard.
+- **Secret Web Base Path (Anti-Scanner Security):** Hide the panel behind a secret URL path (e.g. `http://<IP>:2096/my-secret/`). Requests to root `/` return `404 Not Found`, shielding your server from automated bots and search engines (Shodan, Censys, masscan).
 - **One-Click In-Panel Updates:** Update the VPN Panel itself, sing-box, and Xray-core directly from the web panel UI with real-time log streaming and automatic service reconnection.
 - **Extensive Protocol Support:**
   - **sing-box:** ShadowTLS v3, Shadowsocks 2022 (`2022-blake3-aes-128-gcm`), VLESS Reality, Hysteria 2, TUIC v5, NaiveProxy, WireGuard.

@@ -1,7 +1,7 @@
 import React from 'react'
 import { Menu, LogOut, User, RefreshCw } from 'lucide-react'
 import { useAuthStore } from '../../store/authStore'
-import api from '../../utils/api'
+import api, { getBasePath } from '../../utils/api'
 import toast from 'react-hot-toast'
 
 export default function Header({ onMenuClick }) {
@@ -26,7 +26,8 @@ export default function Header({ onMenuClick }) {
       await api.post('/auth/logout')
     } catch {}
     logout()
-    window.location.href = '/login'
+    const bp = getBasePath()
+    window.location.href = `${bp}/login`
   }
 
   return (

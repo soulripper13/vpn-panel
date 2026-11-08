@@ -100,6 +100,7 @@ db.exec(`
 
 const defaultSettings = {
   panel_port:    String(cfg.PANEL_PORT),
+  web_base_path: cfg.WEB_BASE_PATH || '/',
   server_ip:     cfg.SERVER_IP || '',
   cert_fullchain: cfg.CERT_FULLCHAIN || '',
   cert_privkey:  cfg.CERT_PRIVKEY || '',

@@ -48,6 +48,22 @@ class Settings {
     const rows = db.prepare(`SELECT key, value FROM settings`).all();
     return Object.fromEntries(rows.map((r) => [r.key, r.value]));
   }
+
+  /**
+   * Normalize a web base path:
+   * '' or '/' -> ''
+   * 'secret' or '/secret/' -> '/secret'
+   * @param {string} [p]
+   * @returns {string}
+   */
+  static normalizeBasePath(p) {
+    if (!p || typeof p !== 'string') return '';
+    let s = p.trim();
+    if (s === '' || s === '/') return '';
+    if (!s.startsWith('/')) s = '/' + s;
+    while (s.endsWith('/') && s.length > 1) s = s.slice(0, -1);
+    return s;
+  }
 }
 
 module.exports = Settings;

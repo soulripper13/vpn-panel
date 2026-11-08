@@ -1,8 +1,15 @@
 import axios from 'axios'
 import { useAuthStore } from '../store/authStore'
 
+export const getBasePath = () => {
+  if (typeof window === 'undefined') return ''
+  const bp = window.__BASE_PATH__ || ''
+  if (!bp || bp === '/') return ''
+  return bp.replace(/\/$/, '')
+}
+
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: `${getBasePath()}/api`,
   timeout: 15000,
   withCredentials: true,
   headers: { 'Content-Type': 'application/json' },
@@ -23,7 +30,8 @@ api.interceptors.response.use(
   (err) => {
     if (err.response?.status === 401) {
       useAuthStore.getState().logout()
-      window.location.href = '/login'
+      const bp = getBasePath()
+      window.location.href = `${bp}/login`
     }
     return Promise.reject(err)
   }

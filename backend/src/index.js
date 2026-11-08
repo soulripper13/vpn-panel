@@ -20,6 +20,7 @@ const { WebSocketServer } = require('ws');
 const cfg = require('./config/app-config');
 // Ensure database is initialized
 require('./config/database');
+const Settings = require('./models/Settings');
 const { importExistingConfigs } = require('./utils/importer');
 importExistingConfigs();
 
@@ -35,6 +36,12 @@ const settingsRouter = require('./api/settings');
 
 const app = express();
 const server = http.createServer(app);
+
+// Helper to determine active normalized base path
+function getActiveBasePath() {
+  const raw = Settings.get('web_base_path', cfg.WEB_BASE_PATH || '');
+  return Settings.normalizeBasePath(raw);
+}
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
 
@@ -80,6 +87,42 @@ const authLimiter = rateLimit({
 
 app.use('/api/auth/login', authLimiter);
 
+// ─── Base Path Gatekeeper ─────────────────────────────────────────────────────
+
+app.use((req, res, next) => {
+  const basePath = getActiveBasePath();
+
+  // 1. Always whitelist subscription endpoints so external client apps can fetch configs
+  if (req.path.startsWith('/sub') || req.path.startsWith('/api/sub')) {
+    return next();
+  }
+
+  // 2. If no secret base path is set (standard root deployment '/'), allow all
+  if (!basePath) {
+    return next();
+  }
+
+  // 3. Exact match without trailing slash -> redirect to trailing slash (e.g. /secret -> /secret/)
+  if (req.path === basePath) {
+    const qs = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+    return res.redirect(302, `${basePath}/${qs}`);
+  }
+
+  // 4. If request starts with the secret base path (e.g. /secret/...)
+  if (req.path.startsWith(`${basePath}/`)) {
+    // Strip basePath from req.url so standard internal routers match directly
+    req.basePath = basePath;
+    req.url = req.url.slice(basePath.length);
+    if (!req.url.startsWith('/')) {
+      req.url = '/' + req.url;
+    }
+    return next();
+  }
+
+  // 5. Any other request (scanners, bots hitting /, /admin, /login, etc.) gets 404
+  return res.status(404).send('Cannot GET ' + req.path);
+});
+
 // ─── API Routes ───────────────────────────────────────────────────────────────
 
 app.use('/api/sub', subscriptionRouter);
@@ -117,12 +160,40 @@ for (const dir of candidateStaticDirs) {
   }
 }
 
+let cachedIndexHtml = null;
+let lastIndexMtime = 0;
+
+function getInjectedIndexHtml(basePath) {
+  if (!staticDir) return null;
+  const indexPath = path.join(staticDir, 'index.html');
+  if (!fs.existsSync(indexPath)) return null;
+
+  try {
+    const stat = fs.statSync(indexPath);
+    if (!cachedIndexHtml || stat.mtimeMs > lastIndexMtime) {
+      cachedIndexHtml = fs.readFileSync(indexPath, 'utf8');
+      lastIndexMtime = stat.mtimeMs;
+    }
+    const cleanBase = basePath || '/';
+    const injection = `<script>window.__BASE_PATH__ = "${cleanBase}";</script>\n  `;
+    return cachedIndexHtml.replace('</head>', `${injection}</head>`);
+  } catch {
+    return null;
+  }
+}
+
 if (staticDir) {
   console.log(`[Static] Serving frontend from: ${staticDir}`);
   app.use(express.static(staticDir));
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api') || req.path.startsWith('/ws')) {
       return next();
+    }
+    const basePath = getActiveBasePath();
+    const html = getInjectedIndexHtml(basePath);
+    if (html) {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      return res.send(html);
     }
     res.sendFile(path.join(staticDir, 'index.html'));
   });
@@ -153,7 +224,22 @@ app.use((err, req, res, next) => {
 
 // ─── WebSocket Server ─────────────────────────────────────────────────────────
 
-const wss = new WebSocketServer({ server, path: '/ws' });
+const wss = new WebSocketServer({ noServer: true });
+
+server.on('upgrade', (request, socket, head) => {
+  const basePath = getActiveBasePath();
+  const url = request.url || '';
+  const pathname = url.split('?')[0];
+
+  const allowedPath = basePath ? `${basePath}/ws` : '/ws';
+  if (pathname === allowedPath || pathname === '/ws') {
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit('connection', ws, request);
+    });
+  } else {
+    socket.destroy();
+  }
+});
 
 wss.on('connection', (ws, req) => {
   TrafficService.addWsClient(ws);
@@ -162,8 +248,11 @@ wss.on('connection', (ws, req) => {
 // ─── Start Server ─────────────────────────────────────────────────────────────
 
 server.listen(cfg.PANEL_PORT, '0.0.0.0', () => {
+  const basePath = getActiveBasePath();
+  const displayUrl = `http://${cfg.SERVER_IP || 'localhost'}:${cfg.PANEL_PORT}${basePath || '/'}`;
   console.log(`====================================================`);
   console.log(`  VPN Panel Server is listening on port ${cfg.PANEL_PORT}`);
+  console.log(`  Panel Access URL: ${displayUrl}`);
   console.log(`  Environment: ${cfg.NODE_ENV}`);
   console.log(`  Sing-box Service: ${cfg.SINGBOX_SERVICE}`);
   console.log(`  Xray Service:     ${cfg.XRAY_SERVICE}`);

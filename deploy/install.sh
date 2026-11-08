@@ -160,12 +160,33 @@ else
     info "Using public IP: ${DETECTED_IP}"
 fi
 
+# 5. Secret Base Path selection
+SUGGESTED_BASE_PATH=$(openssl rand -hex 4 2>/dev/null || echo "admin")
+echo ""
+echo -e "${BOLD}5. Web Secret Base Path Security:${NC}"
+echo -e "   Hides the panel from internet scanners (Shodan, Censys) by requiring a secret URL path."
+echo -e "   Any scanner requesting root ${CYAN}/${NC} will receive 404 Not Found."
+WEB_PATH_CHOICE=$(prompt_user "   Use secret URL path? (y/n) [default: ${YELLOW}n${NC} (root /)]: " "n")
+
+WEB_BASE_PATH="/"
+if [[ "${WEB_PATH_CHOICE}" =~ ^[Yy]$ ]]; then
+    SUGGESTED_TOKEN="/${SUGGESTED_BASE_PATH}"
+    CUSTOM_PATH=$(prompt_user "   Enter secret path [default: ${YELLOW}${SUGGESTED_TOKEN}${NC}]: " "${SUGGESTED_TOKEN}")
+    [[ "${CUSTOM_PATH}" != /* ]] && CUSTOM_PATH="/${CUSTOM_PATH}"
+    CUSTOM_PATH="${CUSTOM_PATH%/}"
+    WEB_BASE_PATH="${CUSTOM_PATH:-/}"
+    info "Web Secret Path set to: ${WEB_BASE_PATH}"
+else
+    info "Using standard root path: /"
+fi
+
 echo ""
 info "Setup values:"
 info "  • Panel Port     : ${PANEL_PORT}"
 info "  • Admin Username : ${ADMIN_USERNAME}"
 info "  • Admin Password : ${ADMIN_PASSWORD}"
 info "  • Host / Domain  : ${SERVER_HOST}"
+info "  • Secret Path    : ${WEB_BASE_PATH}"
 echo ""
 
 # ── Step 4: Enable TCP BBR Congestion Control ─────────────────────────────────
@@ -448,6 +469,7 @@ fi
 cat > "${ENV_FILE}" << EOF
 NODE_ENV=production
 PANEL_PORT=${PANEL_PORT}
+WEB_BASE_PATH=${WEB_BASE_PATH}
 SESSION_SECRET=${SESSION_SECRET}
 ADMIN_USERNAME=${ADMIN_USERNAME}
 ADMIN_PASSWORD=${ADMIN_PASSWORD}
@@ -473,6 +495,7 @@ node -e "
 const db = require('./src/config/database');
 const Settings = require('./src/models/Settings');
 Settings.set('panel_port', '${PANEL_PORT}');
+Settings.set('web_base_path', '${WEB_BASE_PATH}');
 Settings.set('server_ip', '${SERVER_HOST}');
 if ('${CERT_FULLCHAIN}') Settings.set('cert_fullchain', '${CERT_FULLCHAIN}');
 if ('${CERT_PRIVKEY}') Settings.set('cert_privkey', '${CERT_PRIVKEY}');
@@ -522,7 +545,13 @@ else
 fi
 
 # ── Done ──────────────────────────────────────────────────────────────────────
-SERVER_URL="http://${SERVER_HOST}:${PANEL_PORT}"
+CLEAN_PATH="${WEB_BASE_PATH#/}"
+if [[ -n "${CLEAN_PATH}" ]]; then
+    FINAL_PATH="/${CLEAN_PATH}/"
+else
+    FINAL_PATH="/"
+fi
+SERVER_URL="http://${SERVER_HOST}:${PANEL_PORT}${FINAL_PATH}"
 echo ""
 echo -e "${BOLD}${GREEN}╔══════════════════════════════════════════════╗${NC}"
 echo -e "${BOLD}${GREEN}║      VPN Panel Installed Successfully!       ║${NC}"
@@ -531,6 +560,7 @@ echo -e "${BOLD}${GREEN}║${NC}  Panel URL : ${CYAN}${SERVER_URL}${NC}"
 echo -e "${BOLD}${GREEN}║${NC}  Username  : ${YELLOW}${ADMIN_USERNAME}${NC}"
 echo -e "${BOLD}${GREEN}║${NC}  Password  : ${YELLOW}${ADMIN_PASSWORD}${NC}"
 echo -e "${BOLD}${GREEN}║${NC}  Host/SNI  : ${GREEN}${SERVER_HOST}${NC}"
+echo -e "${BOLD}${GREEN}║${NC}  Path      : ${PURPLE:-}${WEB_BASE_PATH}${NC}"
 echo -e "${BOLD}${GREEN}║${NC}"
 echo -e "${BOLD}${GREEN}║${NC}  Config    : ${ENV_FILE}"
 echo -e "${BOLD}${GREEN}║${NC}  Logs      : journalctl -u vpn-panel -f"

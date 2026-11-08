@@ -23,6 +23,7 @@ try {
 
 // ─── Panel ────────────────────────────────────────────────────────────────────
 const PANEL_PORT    = parseInt(process.env.PANEL_PORT || '2096', 10);
+const WEB_BASE_PATH = process.env.WEB_BASE_PATH || '';
 const crypto        = require('crypto');
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 
@@ -112,6 +113,7 @@ const LOG_LEVEL = process.env.LOG_LEVEL || (IS_DEV ? 'debug' : 'info');
 module.exports = {
   // Panel
   PANEL_PORT,
+  WEB_BASE_PATH,
   SESSION_SECRET,
   SERVER_IP,
 

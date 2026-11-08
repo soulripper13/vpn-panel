@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { getBasePath } from '../utils/api'
 
 export function useWebSocket() {
   const [data, setData] = useState(null)
@@ -9,7 +10,8 @@ export function useWebSocket() {
   useEffect(() => {
     function connect() {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const wsUrl = `${protocol}//${window.location.host}/ws`
+      const bp = getBasePath()
+      const wsUrl = `${protocol}//${window.location.host}${bp}/ws`
 
       const ws = new WebSocket(wsUrl)
       wsRef.current = ws

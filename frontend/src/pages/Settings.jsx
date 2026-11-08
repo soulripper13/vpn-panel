@@ -24,6 +24,7 @@ export default function Settings() {
   const [settings, setSettings] = useState({
     server_ip: typeof window !== 'undefined' ? (window.location.hostname || '') : '',
     panel_port: '2096',
+    web_base_path: '/',
     cert_fullchain: '',
     cert_privkey: '',
     singbox_bin: '/usr/bin/sing-box',
@@ -95,12 +96,36 @@ export default function Settings() {
     load()
   }, [])
 
+  const generateRandomPath = () => {
+    const rand = Math.random().toString(36).substring(2, 10)
+    setSettings((prev) => ({ ...prev, web_base_path: `/${rand}` }))
+  }
+
   const handleSaveSettings = async (e) => {
     e.preventDefault()
     try {
       setLoading(true)
+      const prevBase = (typeof window !== 'undefined' && window.__BASE_PATH__ && window.__BASE_PATH__ !== '/')
+        ? window.__BASE_PATH__.replace(/\/$/, '')
+        : ''
+
+      let targetBase = (settings.web_base_path || '').trim()
+      if (targetBase === '/' || targetBase === '') {
+        targetBase = ''
+      } else if (!targetBase.startsWith('/')) {
+        targetBase = '/' + targetBase
+      }
+      targetBase = targetBase.replace(/\/$/, '')
+
       const res = await api.put('/settings', settings)
       if (res.data.success) {
+        if (targetBase !== prevBase) {
+          toast.success(`Web secret path updated to "${targetBase || '/'}"! Redirecting...`, { duration: 3000 })
+          setTimeout(() => {
+            window.location.href = `${targetBase || ''}/settings`
+          }, 1500)
+          return
+        }
         toast.success('Settings saved successfully!')
       }
     } catch (err) {
@@ -151,7 +176,7 @@ export default function Settings() {
           <h3 className="text-sm font-semibold text-white">General & Network Settings</h3>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
             <label className="text-xs font-medium text-slate-300 block mb-1">Server Public IP / Hostname</label>
             <input
@@ -171,6 +196,30 @@ export default function Settings() {
               onChange={(e) => setSettings({ ...settings, panel_port: e.target.value })}
               className="w-full bg-[#14161f] border border-[#2d3148] rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono"
             />
+            <p className="text-[11px] text-slate-500 mt-1">Listening web dashboard port</p>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs font-medium text-slate-300 block">Web Secret Base Path</label>
+              <button
+                type="button"
+                onClick={generateRandomPath}
+                className="text-[10px] text-indigo-400 hover:text-indigo-300 font-medium transition cursor-pointer"
+              >
+                + Random Token
+              </button>
+            </div>
+            <input
+              type="text"
+              placeholder="/ (e.g. /my-secret)"
+              value={settings.web_base_path || '/'}
+              onChange={(e) => setSettings({ ...settings, web_base_path: e.target.value })}
+              className="w-full bg-[#14161f] border border-[#2d3148] rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono"
+            />
+            <p className="text-[11px] text-slate-500 mt-1">
+              Hides panel behind secret URL. Scanners hitting / get 404.
+            </p>
           </div>
         </div>
 

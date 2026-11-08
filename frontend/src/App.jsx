@@ -21,8 +21,11 @@ function GuestGuard({ children }) {
 }
 
 export default function App() {
+  const rawBase = typeof window !== 'undefined' ? (window.__BASE_PATH__ || '') : ''
+  const basename = (rawBase && rawBase !== '/') ? rawBase.replace(/\/$/, '') : ''
+
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={basename}>
       <Routes>
         <Route
           path="/login"
