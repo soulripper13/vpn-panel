@@ -100,8 +100,9 @@ db.exec(`
 
 const defaultSettings = {
   panel_port:    String(cfg.PANEL_PORT),
-  cert_fullchain: cfg.CERT_FULLCHAIN,
-  cert_privkey:  cfg.CERT_PRIVKEY,
+  server_ip:     cfg.SERVER_IP || '',
+  cert_fullchain: cfg.CERT_FULLCHAIN || '',
+  cert_privkey:  cfg.CERT_PRIVKEY || '',
   singbox_bin:   cfg.SINGBOX_BIN,
   singbox_config: cfg.SINGBOX_CONFIG,
   xray_bin:      cfg.XRAY_BIN,

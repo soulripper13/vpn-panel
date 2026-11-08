@@ -80,7 +80,79 @@ apt-get install -y --no-install-recommends \
     2>/dev/null
 success "System packages installed."
 
-# ── Step 3: Enable TCP BBR Congestion Control ─────────────────────────────────
+# ── Step 3: Interactive Configuration ─────────────────────────────────────────
+header "Interactive Setup & Customization"
+
+prompt_user() {
+    local prompt_msg="$1"
+    local default_val="$2"
+    local result=""
+    if [[ -t 0 ]]; then
+        read -rp "$(echo -e "$prompt_msg")" result
+    elif [[ -r /dev/tty ]]; then
+        read -rp "$(echo -e "$prompt_msg")" result </dev/tty
+    else
+        result="$default_val"
+    fi
+    echo "${result:-$default_val}"
+}
+
+# Auto-detect public server IP for smart default
+info "Detecting public server IP..."
+DETECTED_IP=$(curl -s4 --max-time 3 ifconfig.me 2>/dev/null || curl -s4 --max-time 3 icanhazip.com 2>/dev/null || ip -4 route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}' || hostname -I 2>/dev/null | awk '{print $1}' || echo "127.0.0.1")
+
+# Generate secure suggested random password (alphanumeric 10 chars)
+SUGGESTED_PASS=$(openssl rand -base64 9 2>/dev/null | tr -dc 'a-zA-Z0-9' | head -c 10)
+[[ -z "${SUGGESTED_PASS}" ]] && SUGGESTED_PASS="admin123"
+
+echo -e "\n${BOLD}${CYAN}Please customize your VPN Panel settings (press Enter to accept suggested defaults):${NC}\n"
+
+# 1. Port
+PANEL_PORT=$(prompt_user "${BOLD}1. Web Panel Port${NC} [default: ${YELLOW}2096${NC}]: " "2096")
+
+# 2. Username
+ADMIN_USERNAME=$(prompt_user "${BOLD}2. Admin Username${NC} [default: ${YELLOW}admin${NC}]: " "admin")
+
+# 3. Password
+ADMIN_PASSWORD=$(prompt_user "${BOLD}3. Admin Password${NC} [default: ${YELLOW}${SUGGESTED_PASS}${NC}]: " "${SUGGESTED_PASS}")
+
+# 4. Domain / IP selection
+echo ""
+echo -e "${BOLD}4. Server Host / Domain Configuration:${NC}"
+echo -e "   Detected Public IP: ${GREEN}${DETECTED_IP}${NC}"
+USE_DOMAIN=$(prompt_user "   Do you want to bind a domain name to this server? (y/n) [default: ${YELLOW}n${NC}]: " "n")
+
+SERVER_HOST="${DETECTED_IP}"
+CERT_FULLCHAIN=""
+CERT_PRIVKEY=""
+
+if [[ "${USE_DOMAIN}" =~ ^[Yy]$ ]]; then
+    DOMAIN_INPUT=$(prompt_user "   Enter your domain name (e.g. ${CYAN}vpn.example.com${NC}): " "")
+    if [[ -n "${DOMAIN_INPUT}" ]]; then
+        SERVER_HOST="${DOMAIN_INPUT}"
+        info "Domain set to: ${SERVER_HOST}"
+        # Automatically detect existing Let's Encrypt certificates if present
+        if [[ -f "/etc/letsencrypt/live/${SERVER_HOST}/fullchain.pem" ]]; then
+            CERT_FULLCHAIN="/etc/letsencrypt/live/${SERVER_HOST}/fullchain.pem"
+            CERT_PRIVKEY="/etc/letsencrypt/live/${SERVER_HOST}/privkey.pem"
+            success "Existing Let's Encrypt certificate found for ${SERVER_HOST}."
+        fi
+    else
+        warn "No domain entered. Falling back to server IP: ${DETECTED_IP}"
+    fi
+else
+    info "Using public IP: ${DETECTED_IP}"
+fi
+
+echo ""
+info "Setup values:"
+info "  • Panel Port     : ${PANEL_PORT}"
+info "  • Admin Username : ${ADMIN_USERNAME}"
+info "  • Admin Password : ${ADMIN_PASSWORD}"
+info "  • Host / Domain  : ${SERVER_HOST}"
+echo ""
+
+# ── Step 4: Enable TCP BBR Congestion Control ─────────────────────────────────
 header "Enabling TCP BBR Congestion Control"
 
 if ! grep -q "net.ipv4.tcp_congestion_control=bbr" /etc/sysctl.conf 2>/dev/null; then
@@ -345,69 +417,40 @@ cat > "${ENV_FILE}" << EOF
 NODE_ENV=production
 PANEL_PORT=${PANEL_PORT}
 SESSION_SECRET=${SESSION_SECRET}
+ADMIN_USERNAME=${ADMIN_USERNAME}
+ADMIN_PASSWORD=${ADMIN_PASSWORD}
+SERVER_IP=${SERVER_HOST}
+CERT_FULLCHAIN=${CERT_FULLCHAIN}
+CERT_PRIVKEY=${CERT_PRIVKEY}
 DB_PATH=${DATA_DIR}/panel.db
 SINGBOX_BIN=${SINGBOX_BIN}
 SINGBOX_CONFIG=${SINGBOX_CONFIG}
 XRAY_BIN=${XRAY_BIN}
 XRAY_CONFIG=${XRAY_CONFIG}
-CERT_PATH=${CERT_PATH}
-KEY_PATH=${KEY_PATH}
 LOG_LEVEL=info
 EOF
 
 chmod 600 "${ENV_FILE}"
 success ".env written to ${ENV_FILE}"
 
-# ── Step 13: Initialize SQLite database ─────────────────────────────────────
+# ── Step 14: Initialize SQLite database ─────────────────────────────────────
 header "Initializing Database"
 
-DB_PATH="${DATA_DIR}/panel.db"
+cd "${BACKEND_DIR}"
+node -e "
+const db = require('./src/config/database');
+const Settings = require('./src/models/Settings');
+Settings.set('panel_port', '${PANEL_PORT}');
+Settings.set('server_ip', '${SERVER_HOST}');
+if ('${CERT_FULLCHAIN}') Settings.set('cert_fullchain', '${CERT_FULLCHAIN}');
+if ('${CERT_PRIVKEY}') Settings.set('cert_privkey', '${CERT_PRIVKEY}');
+" 2>/dev/null || true
+cd -
 
-HASHED_PASS=$(node -e "
-const crypto = require('crypto');
-const salt = crypto.randomBytes(16).toString('hex');
-const hash = crypto.createHmac('sha256', salt).update('${DEFAULT_ADMIN_PASS}').digest('hex');
-console.log(salt + ':' + hash);
-")
+success "Database initialized at ${DATA_DIR}/panel.db"
+info "Credentials configured → user: ${ADMIN_USERNAME} / pass: ${ADMIN_PASSWORD}"
 
-sqlite3 "${DB_PATH}" << SQLEOF
-CREATE TABLE IF NOT EXISTS users (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    username    TEXT    UNIQUE NOT NULL,
-    password    TEXT    NOT NULL,
-    role        TEXT    NOT NULL DEFAULT 'admin',
-    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
-    last_login  DATETIME
-);
-
-CREATE TABLE IF NOT EXISTS sessions (
-    id          TEXT PRIMARY KEY,
-    user_id     INTEGER NOT NULL,
-    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
-    expires_at  DATETIME NOT NULL,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS settings (
-    key         TEXT PRIMARY KEY,
-    value       TEXT NOT NULL,
-    updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-INSERT OR IGNORE INTO users (username, password, role)
-VALUES ('${DEFAULT_ADMIN_USER}', '${HASHED_PASS}', 'admin');
-
-INSERT OR REPLACE INTO settings (key, value) VALUES
-    ('panel_port', '${PANEL_PORT}'),
-    ('theme', 'dark'),
-    ('log_retention_days', '7');
-SQLEOF
-
-chmod 600 "${DB_PATH}"
-success "Database initialized at ${DB_PATH}"
-info "Default credentials → user: ${DEFAULT_ADMIN_USER} / pass: ${DEFAULT_ADMIN_PASS}"
-
-# ── Step 14: Set ownership & permissions ────────────────────────────────────
+# ── Step 15: Set ownership & permissions ────────────────────────────────────
 header "Setting Permissions"
 
 chown -R root:root "${PANEL_DIR}"
@@ -415,7 +458,7 @@ chmod -R 750 "${PANEL_DIR}"
 chmod 755 "${FRONTEND_DIR}"
 success "Permissions set."
 
-# ── Step 15: Configure firewall (optional) ───────────────────────────────────
+# ── Step 16: Configure firewall (optional) ───────────────────────────────────
 header "Firewall Configuration"
 
 if command -v ufw &>/dev/null; then
@@ -430,11 +473,11 @@ else
     info "UFW not installed — skipping firewall configuration."
 fi
 
-# ── Step 16: Start service ───────────────────────────────────────────────────
+# ── Step 17: Start service ───────────────────────────────────────────────────
 header "Starting VPN Panel Service"
 
 systemctl enable "${SERVICE_NAME}"
-systemctl start "${SERVICE_NAME}"
+systemctl restart "${SERVICE_NAME}" 2>/dev/null || systemctl start "${SERVICE_NAME}"
 
 sleep 2
 
@@ -447,16 +490,15 @@ else
 fi
 
 # ── Done ──────────────────────────────────────────────────────────────────────
-SERVER_IP=$(hostname -I | awk '{print $1}')
+SERVER_URL="http://${SERVER_HOST}:${PANEL_PORT}"
 echo ""
 echo -e "${BOLD}${GREEN}╔══════════════════════════════════════════════╗${NC}"
 echo -e "${BOLD}${GREEN}║      VPN Panel Installed Successfully!       ║${NC}"
 echo -e "${BOLD}${GREEN}╠══════════════════════════════════════════════╣${NC}"
-echo -e "${BOLD}${GREEN}║${NC}  Panel URL : ${CYAN}http://${SERVER_IP}:${PANEL_PORT}${NC}"
-echo -e "${BOLD}${GREEN}║${NC}  Username  : ${YELLOW}${DEFAULT_ADMIN_USER}${NC}"
-echo -e "${BOLD}${GREEN}║${NC}  Password  : ${YELLOW}${DEFAULT_ADMIN_PASS}${NC}"
-echo -e "${BOLD}${GREEN}║${NC}"
-echo -e "${BOLD}${GREEN}║${NC}  ${RED}⚠ Change your password immediately!${NC}"
+echo -e "${BOLD}${GREEN}║${NC}  Panel URL : ${CYAN}${SERVER_URL}${NC}"
+echo -e "${BOLD}${GREEN}║${NC}  Username  : ${YELLOW}${ADMIN_USERNAME}${NC}"
+echo -e "${BOLD}${GREEN}║${NC}  Password  : ${YELLOW}${ADMIN_PASSWORD}${NC}"
+echo -e "${BOLD}${GREEN}║${NC}  Host/SNI  : ${GREEN}${SERVER_HOST}${NC}"
 echo -e "${BOLD}${GREEN}║${NC}"
 echo -e "${BOLD}${GREEN}║${NC}  Config    : ${ENV_FILE}"
 echo -e "${BOLD}${GREEN}║${NC}  Logs      : journalctl -u vpn-panel -f"

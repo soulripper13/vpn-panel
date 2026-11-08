@@ -14,55 +14,50 @@
 
 ## Installation
 
-### Option A — Remote One-Click Deploy (from your Mac)
+### Option A — One-Click Direct Remote Install (on server)
+
+```bash
+bash <(curl -Ls https://raw.githubusercontent.com/soulripper13/vpn-panel/main/deploy/install.sh)
+```
+
+The interactive installer will prompt you to configure:
+1. **Web Panel Port** *(default: `2096`)*
+2. **Admin Username** *(default: `admin`)*
+3. **Admin Password** *(default: auto-generated secure random password)*
+4. **Domain Configuration** *(bind a domain or use auto-detected public IP)*
+
+### Option B — Remote Deploy from your Workstation (deploy.sh)
 
 ```bash
 # Clone the repository
 git clone https://github.com/soulripper13/vpn-panel.git
 cd vpn-panel
 
-# Run the deploy script
-./deploy/deploy.sh root@107.182.23.115 -p 26183
+# Run deploy script targeting your VPS
+./deploy/deploy.sh root@<SERVER_IP> -p <SSH_PORT>
 ```
 
-The script will:
-1. Build the frontend locally
-2. Package everything into a tarball
-3. Upload to the server via SCP
-4. SSH in and run `install.sh` automatically
-
-### Option B — Manual Install (on the server directly)
+### Option C — Manual Git Clone on the Server
 
 ```bash
-# On the server
 git clone https://github.com/soulripper13/vpn-panel.git /tmp/vpn-panel
 cd /tmp/vpn-panel
 chmod +x deploy/install.sh
 sudo ./deploy/install.sh
 ```
 
-### Option C — Skip Frontend Build (pre-built dist exists)
-
-```bash
-./deploy/deploy.sh root@107.182.23.115 -p 26183 --skip-build
-```
-
 ---
 
 ## Accessing the Panel
 
-After installation, open:
+After installation, open in your browser:
 
 ```
-http://107.182.23.115:2096
+http://<YOUR_SERVER_IP_OR_DOMAIN>:<PANEL_PORT>
 ```
 
-**Default credentials:**
-
-| Field | Value |
-|---|---|
-| Username | `admin` |
-| Password | `admin123` |
+**Credentials:**
+Configured during the interactive installer (or default `admin` with your chosen/suggested password).
 
 > **⚠ Change your password immediately after first login!**
 

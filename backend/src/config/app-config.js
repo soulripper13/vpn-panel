@@ -86,9 +86,12 @@ const defaultDbPath = fs.existsSync('/opt/vpn-panel/data/panel.db')
   : path.join(__dirname, '../../data/panel.db');
 const DB_PATH = process.env.DB_PATH || defaultDbPath;
 
+// ─── Server Host / Domain ─────────────────────────────────────────────────────
+const SERVER_IP = process.env.SERVER_IP || '';
+
 // ─── Default credentials ──────────────────────────────────────────────────────
-const DEFAULT_ADMIN_USERNAME = 'admin';
-const DEFAULT_ADMIN_PASSWORD = 'admin123';  // plain; will be bcrypt-hashed on first run
+const DEFAULT_ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
+const DEFAULT_ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';  // plain; will be bcrypt-hashed on first run
 
 // ─── WebSocket ────────────────────────────────────────────────────────────────
 const WS_PUSH_INTERVAL_MS = parseInt(process.env.WS_PUSH_INTERVAL_MS || '2000', 10);
@@ -110,6 +113,7 @@ module.exports = {
   // Panel
   PANEL_PORT,
   SESSION_SECRET,
+  SERVER_IP,
 
   // Sing-box
   SINGBOX_BIN,
