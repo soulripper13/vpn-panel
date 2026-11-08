@@ -32,20 +32,56 @@ check_root() {
 get_db_setting() {
     local key="$1"
     local default_val="${2:-}"
-    if [[ -f "${DB_PATH}" ]] && command -v sqlite3 &>/dev/null; then
-        local val
+    local val=""
+
+    # 1. Try sqlite3 CLI
+    if command -v sqlite3 &>/dev/null && [[ -f "${DB_PATH}" ]]; then
         val=$(sqlite3 "${DB_PATH}" "SELECT value FROM settings WHERE key='${key}' LIMIT 1;" 2>/dev/null || echo "")
-        echo "${val:-$default_val}"
-    else
-        echo "$default_val"
+        if [[ -n "${val}" ]]; then
+            echo "${val}"
+            return
+        fi
     fi
+
+    # 2. Try Node.js with better-sqlite3
+    if command -v node &>/dev/null && [[ -f "${DB_PATH}" && -f "${BACKEND_DIR}/src/config/database.js" ]]; then
+        val=$(node -e "try { const db = require('${BACKEND_DIR}/src/config/database'); const r = db.prepare('SELECT value FROM settings WHERE key = ?').get('${key}'); if (r && r.value) console.log(r.value); } catch {}" 2>/dev/null || true)
+        if [[ -n "${val}" ]]; then
+            echo "${val}"
+            return
+        fi
+    fi
+
+    # 3. Fallback to .env file
+    if [[ -f "${ENV_FILE}" ]]; then
+        local env_key=""
+        case "${key}" in
+            panel_port) env_key="PANEL_PORT" ;;
+            web_base_path) env_key="WEB_BASE_PATH" ;;
+            server_ip) env_key="SERVER_IP" ;;
+            cert_fullchain) env_key="CERT_FULLCHAIN" ;;
+            cert_privkey) env_key="CERT_PRIVKEY" ;;
+        esac
+        if [[ -n "${env_key}" ]]; then
+            val=$(grep -E "^${env_key}=" "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'")
+            if [[ -n "${val}" ]]; then
+                echo "${val}"
+                return
+            fi
+        fi
+    fi
+
+    echo "${default_val}"
 }
 
 set_db_setting() {
     local key="$1"
     local val="$2"
-    if [[ -f "${DB_PATH}" ]] && command -v sqlite3 &>/dev/null; then
+    if command -v sqlite3 &>/dev/null && [[ -f "${DB_PATH}" ]]; then
         sqlite3 "${DB_PATH}" "INSERT OR REPLACE INTO settings (key, value) VALUES ('${key}', '${val}');" 2>/dev/null || true
+    fi
+    if command -v node &>/dev/null && [[ -f "${BACKEND_DIR}/src/config/database.js" ]]; then
+        node -e "try { const db = require('${BACKEND_DIR}/src/config/database'); db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('${key}', '${val}'); } catch {}" 2>/dev/null || true
     fi
 }
 
