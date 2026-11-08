@@ -91,7 +91,7 @@ UPDATE users SET password='<new_hash>' WHERE username='admin';
 ```bash
 cd vpn-panel
 git pull
-./deploy/deploy.sh root@107.182.23.115 -p 26183
+./deploy/deploy.sh root@<SERVER_IP> -p <SSH_PORT>
 ```
 
 ### On-server update

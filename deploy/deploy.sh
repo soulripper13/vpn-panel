@@ -4,7 +4,7 @@
 #  Run from your local Mac to build, package, and deploy to the server
 #
 #  Usage: ./deploy/deploy.sh [user@host] [-p port] [--skip-build]
-#  Example: ./deploy/deploy.sh root@107.182.23.115 -p 26183
+#  Example: ./deploy/deploy.sh root@<SERVER_IP> -p 22
 # =============================================================================
 set -euo pipefail
 
@@ -36,7 +36,7 @@ TARBALL="vpn-panel.tar.gz"
 usage() {
     echo "Usage: $0 user@host [-p ssh_port] [--skip-build]"
     echo ""
-    echo "  user@host       Remote server (e.g. root@107.182.23.115)"
+    echo "  user@host       Remote server (e.g. root@your-server-ip)"
     echo "  -p port         SSH port (default: 22)"
     echo "  --skip-build    Skip frontend build (use existing dist/)"
     echo ""

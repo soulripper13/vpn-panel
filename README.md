@@ -55,7 +55,7 @@ Run the remote deployment script from your workstation:
 
 ```bash
 cd vpn-panel
-./deploy/deploy.sh root@107.182.23.115 -p 26183
+./deploy/deploy.sh root@<SERVER_IP> -p <SSH_PORT>
 ```
 
 Or install directly on your target server:
