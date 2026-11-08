@@ -26,8 +26,8 @@ NODE_VERSION="20"
 
 SINGBOX_BIN="/usr/bin/sing-box"
 SINGBOX_CONFIG="/etc/sing-box/config.json"
-XRAY_BIN="/usr/local/x-ui/bin/xray-linux-amd64"
-XRAY_CONFIG="/usr/local/x-ui/bin/config.json"
+XRAY_BIN="/usr/local/bin/xray"
+XRAY_CONFIG="/etc/xray/config.json"
 CERT_PATH="/root/cert/ip/fullchain.pem"
 KEY_PATH="/root/cert/ip/privkey.pem"
 
@@ -255,9 +255,16 @@ success "sing-box service enabled."
 header "Checking / Installing Xray Core"
 
 XRAY_INSTALLED=false
-if command -v xray &>/dev/null || [[ -f /usr/local/bin/xray ]] || [[ -f /usr/local/x-ui/bin/xray-linux-amd64 ]]; then
+if command -v xray &>/dev/null || [[ -f /usr/local/bin/xray ]]; then
     XRAY_INSTALLED=true
     success "Xray already installed: $(command -v xray || echo /usr/local/bin/xray)"
+elif [[ -f /usr/local/x-ui/bin/xray-linux-amd64 ]]; then
+    info "Migrating Xray binary to /usr/local/bin/xray (safely decoupling from x-ui)..."
+    mkdir -p /usr/local/bin
+    cp -a /usr/local/x-ui/bin/xray-linux-amd64 /usr/local/bin/xray
+    chmod +x /usr/local/bin/xray
+    XRAY_INSTALLED=true
+    success "Xray migrated to /usr/local/bin/xray."
 else
     info "Installing Xray core from official GitHub release..."
     XRAY_VER=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
@@ -265,7 +272,7 @@ else
     [[ "$ARCH" == "amd64" ]] && ARCH="64"
     [[ "$ARCH" == "arm64" ]] && ARCH="arm64-v8a"
     curl -Lo /tmp/xray.zip "https://github.com/XTLS/Xray-core/releases/download/v${XRAY_VER}/Xray-linux-${ARCH}.zip"
-    mkdir -p /usr/local/bin /usr/local/share/xray /usr/local/x-ui/bin /etc/xray /tmp/xray-extracted
+    mkdir -p /usr/local/bin /usr/local/share/xray /etc/xray /tmp/xray-extracted
     unzip -qo /tmp/xray.zip -d /tmp/xray-extracted
     mv /tmp/xray-extracted/xray /usr/local/bin/xray
     mv /tmp/xray-extracted/geoip.dat /usr/local/share/xray/ 2>/dev/null || true
@@ -275,21 +282,23 @@ else
     success "Xray v${XRAY_VER} installed from GitHub."
 fi
 
-# Ensure compatibility symlinks
-mkdir -p /usr/local/x-ui/bin /usr/local/bin
-if [[ -f /usr/local/bin/xray && ! -f /usr/local/x-ui/bin/xray-linux-amd64 ]]; then
-    ln -sf /usr/local/bin/xray /usr/local/x-ui/bin/xray-linux-amd64
+# Ensure geoip/geosite are in standard /usr/local/share/xray
+mkdir -p /usr/local/share/xray /etc/xray
+if [[ ! -f /usr/local/share/xray/geoip.dat && -f /usr/local/x-ui/bin/geoip.dat ]]; then
+    cp -a /usr/local/x-ui/bin/geoip.dat /usr/local/share/xray/ 2>/dev/null || true
 fi
-if [[ -f /usr/local/x-ui/bin/xray-linux-amd64 && ! -f /usr/local/bin/xray ]]; then
-    ln -sf /usr/local/x-ui/bin/xray-linux-amd64 /usr/local/bin/xray
-fi
-if [[ -f /usr/local/bin/xray && ! -f /usr/bin/xray ]]; then
-    ln -sf /usr/local/bin/xray /usr/bin/xray
+if [[ ! -f /usr/local/share/xray/geosite.dat && -f /usr/local/x-ui/bin/geosite.dat ]]; then
+    cp -a /usr/local/x-ui/bin/geosite.dat /usr/local/share/xray/ 2>/dev/null || true
 fi
 
-# Ensure config file exists
-if [[ ! -f /usr/local/x-ui/bin/config.json && ! -f /etc/xray/config.json ]]; then
-    cat > /usr/local/x-ui/bin/config.json <<EOF
+# Migrate existing Xray config out of /usr/local/x-ui/bin/ into standard /etc/xray/config.json
+if [[ ! -f /etc/xray/config.json && -f /usr/local/x-ui/bin/config.json ]]; then
+    info "Migrating Xray config to /etc/xray/config.json..."
+    cp -a /usr/local/x-ui/bin/config.json /etc/xray/config.json
+fi
+
+if [[ ! -f /etc/xray/config.json ]]; then
+    cat > /etc/xray/config.json <<EOF
 {
   "log": { "loglevel": "info" },
   "inbounds": [],
@@ -298,9 +307,14 @@ if [[ ! -f /usr/local/x-ui/bin/config.json && ! -f /etc/xray/config.json ]]; the
 EOF
 fi
 
-# Ensure xray systemd service exists & is enabled
-if [[ ! -f /etc/systemd/system/xray.service && ! -f /lib/systemd/system/xray.service ]]; then
-    cat > /etc/systemd/system/xray.service <<EOF
+# Maintain compatibility symlinks if /usr/local/x-ui exists
+if [[ -d /usr/local/x-ui/bin ]]; then
+    ln -sf /usr/local/bin/xray /usr/local/x-ui/bin/xray-linux-amd64 2>/dev/null || true
+    ln -sf /etc/xray/config.json /usr/local/x-ui/bin/config.json 2>/dev/null || true
+fi
+
+# Ensure standalone xray systemd service points to standard /usr/local/bin/xray and /etc/xray/config.json
+cat > /etc/systemd/system/xray.service <<EOF
 [Unit]
 Description=Xray Service
 Documentation=https://github.com/xtls
@@ -311,7 +325,7 @@ User=root
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 NoNewPrivileges=true
-ExecStart=/usr/local/bin/xray run -config /usr/local/x-ui/bin/config.json
+ExecStart=/usr/local/bin/xray run -config /etc/xray/config.json
 Restart=on-failure
 RestartPreventExitStatus=23
 LimitNPROC=10000
@@ -320,9 +334,11 @@ LimitNOFILE=1000000
 [Install]
 WantedBy=multi-user.target
 EOF
-    systemctl daemon-reload
-fi
+
+systemctl daemon-reload
 systemctl enable xray 2>/dev/null || true
+systemctl restart xray 2>/dev/null || systemctl start xray 2>/dev/null || true
+success "Standalone xray service installed and active."
 systemctl start xray 2>/dev/null || true
 success "xray service enabled."
 
