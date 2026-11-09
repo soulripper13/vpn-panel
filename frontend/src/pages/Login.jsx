@@ -27,7 +27,7 @@ export default function Login() {
       })
 
       if (res.data.success) {
-        login(res.data.data.user)
+        login(res.data.data.user, null, res.data.data.csrfToken)
         toast.success('Welcome back!')
         const bp = getBasePath()
         window.location.href = `${bp}/dashboard`

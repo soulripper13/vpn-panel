@@ -27,20 +27,31 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
-// Dynamically ensure request baseURL matches active base path and attach token
+// Dynamically ensure request baseURL matches active base path and attach token + CSRF header
 api.interceptors.request.use((config) => {
   const bp = getBasePath()
   config.baseURL = `${bp}/api`
-  const token = useAuthStore.getState().token
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
+  const state = useAuthStore.getState()
+  if (state.token) {
+    config.headers.Authorization = `Bearer ${state.token}`
+  }
+  if (state.csrfToken) {
+    config.headers['X-CSRF-Token'] = state.csrfToken
   }
   return config
 })
 
-// Auto-logout on 401
+// Auto-capture CSRF tokens and auto-logout on 401
 api.interceptors.response.use(
-  (res) => res,
+  (res) => {
+    const csrfHeader = res.headers?.['x-csrf-token']
+    if (csrfHeader) {
+      useAuthStore.getState().setCsrfToken(csrfHeader)
+    } else if (res.data?.data?.csrfToken) {
+      useAuthStore.getState().setCsrfToken(res.data.data.csrfToken)
+    }
+    return res
+  },
   (err) => {
     if (err.response?.status === 401) {
       useAuthStore.getState().logout()

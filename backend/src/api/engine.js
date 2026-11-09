@@ -11,9 +11,11 @@ const SingboxService = require('../services/singbox');
 const XrayService = require('../services/xray');
 const BinaryUpdaterService = require('../services/binary-updater');
 const PanelUpdaterService = require('../services/panel-updater');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requireAdminForMutations } = require('../middleware/auth');
+const { logAudit } = require('../utils/audit');
 
 router.use(requireAuth);
+router.use(requireAdminForMutations);
 
 // ─── SING-BOX ─────────────────────────────────────────────────────────────────
 

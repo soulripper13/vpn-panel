@@ -14,20 +14,40 @@ const Client = require('../models/Client');
 const SingboxService = require('./singbox');
 const XrayService = require('./xray');
 
+const MAX_WS_CLIENTS = 50;
+
 class TrafficService {
   constructor() {
     this.timer = null;
+    this.retentionTimer = null;
+    this.quotaTimer = null;
+    this.heartbeatTimer = null;
     this.wsClients = new Set();
     this.isPolling = false;
+    this.MAX_WS_CLIENTS = MAX_WS_CLIENTS;
   }
 
   /**
-   * Register a WebSocket client for real-time broadcasts
+   * Register an authenticated WebSocket client for real-time broadcasts (C2)
+   * @param {import('ws').WebSocket} ws
+   * @param {object} user
    */
-  addWsClient(ws) {
+  addWsClient(ws, user = null) {
+    if (this.wsClients.size >= MAX_WS_CLIENTS) {
+      ws.close(1008, 'Maximum connections exceeded');
+      return;
+    }
+
+    ws.isAlive = true;
+    ws.user = user;
+    ws.on('pong', () => {
+      ws.isAlive = true;
+    });
+
     this.wsClients.add(ws);
+
     // Send immediate stats
-    this.getSystemOverview().then((data) => {
+    this.getSystemOverview(user).then((data) => {
       if (ws.readyState === 1) { // OPEN
         ws.send(JSON.stringify({ type: 'overview', data }));
       }
@@ -39,25 +59,65 @@ class TrafficService {
   }
 
   /**
-   * Broadcast message to all connected WebSocket clients
+   * Broadcast message to all connected WebSocket clients with role-appropriate redaction
    */
-  broadcast(data) {
-    const payload = JSON.stringify(data);
-    for (const ws of this.wsClients) {
-      if (ws.readyState === 1) {
-        ws.send(payload);
+  async broadcast() {
+    if (this.wsClients.size === 0) return;
+
+    try {
+      const adminOverview = await this.getSystemOverview({ role: 'admin' });
+      const viewerOverview = await this.getSystemOverview({ role: 'viewer' });
+
+      const adminPayload = JSON.stringify({
+        type: 'stats',
+        timestamp: Date.now(),
+        data: adminOverview,
+      });
+
+      const viewerPayload = JSON.stringify({
+        type: 'stats',
+        timestamp: Date.now(),
+        data: viewerOverview,
+      });
+
+      for (const ws of this.wsClients) {
+        if (ws.readyState === 1) {
+          const payload = (ws.user && ws.user.role === 'admin') ? adminPayload : viewerPayload;
+          ws.send(payload);
+        }
       }
-    }
+    } catch {}
   }
 
   /**
-   * Start polling loop
+   * Start polling, retention, and quota loops
    */
   start() {
     if (this.timer) return;
     this.timer = setInterval(() => this.poll(), cfg.WS_PUSH_INTERVAL_MS);
+
     // Initial run
     setTimeout(() => this.poll(), 1000);
+
+    // Heartbeat ping loop every 30s (C2)
+    this.heartbeatTimer = setInterval(() => {
+      for (const ws of this.wsClients) {
+        if (!ws.isAlive) {
+          ws.terminate();
+          this.wsClients.delete(ws);
+          continue;
+        }
+        ws.isAlive = false;
+        try { ws.ping(); } catch {}
+      }
+    }, 30000);
+
+    // Periodic traffic log retention pruning every 6 hours (M1)
+    this.retentionTimer = setInterval(() => this.pruneOldLogs(), 6 * 60 * 60 * 1000);
+    setTimeout(() => this.pruneOldLogs(), 60000);
+
+    // Periodic quota & expiry enforcement check every 60s (C6)
+    this.quotaTimer = setInterval(() => this.checkQuotasAndExpiry(), 60000);
   }
 
   /**
@@ -67,6 +127,74 @@ class TrafficService {
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
+    }
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+    if (this.retentionTimer) {
+      clearInterval(this.retentionTimer);
+      this.retentionTimer = null;
+    }
+    if (this.quotaTimer) {
+      clearInterval(this.quotaTimer);
+      this.quotaTimer = null;
+    }
+  }
+
+  /**
+   * Prune traffic logs older than 30 days (M1)
+   */
+  pruneOldLogs() {
+    try {
+      const thirtyDaysAgo = Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
+      db.prepare('DELETE FROM traffic_logs WHERE logged_at < ?').run(thirtyDaysAgo);
+    } catch (err) {
+      console.warn('[Traffic Log Retention] Notice on pruning:', err.message);
+    }
+  }
+
+  /**
+   * Check clients for expiry or traffic quota exceedance and reapply configs if changed (C6)
+   */
+  async checkQuotasAndExpiry() {
+    try {
+      const enabledClients = Client.findEnabled();
+      const now = Math.floor(Date.now() / 1000);
+      let needsSingboxReload = false;
+      let needsXrayReload = false;
+
+      for (const c of enabledClients) {
+        let isExpired = false;
+        let isOverQuota = false;
+
+        if (c.expiry_time && c.expiry_time > 0) {
+          const exp = c.expiry_time > 10000000000 ? Math.floor(c.expiry_time / 1000) : c.expiry_time;
+          if (now > exp) isExpired = true;
+        }
+
+        if (c.total_bytes_limit && c.total_bytes_limit > 0) {
+          const used = (c.up_bytes || 0) + (c.down_bytes || 0);
+          if (used >= c.total_bytes_limit) isOverQuota = true;
+        }
+
+        if (isExpired || isOverQuota) {
+          const inb = Inbound.findById(c.inbound_id);
+          if (inb) {
+            if (inb.engine === 'singbox') needsSingboxReload = true;
+            if (inb.engine === 'xray') needsXrayReload = true;
+          }
+        }
+      }
+
+      if (needsSingboxReload) {
+        await SingboxService.generateAndApplyConfig().catch(() => {});
+      }
+      if (needsXrayReload) {
+        await XrayService.generateAndApplyConfig().catch(() => {});
+      }
+    } catch (err) {
+      console.warn('[Quota Scheduler] Notice:', err.message);
     }
   }
 
@@ -82,15 +210,8 @@ class TrafficService {
       const xrayStats = await XrayService.queryTraffic();
       this.processXrayStats(xrayStats);
 
-      // 2. Query System metrics and engine status
-      const overview = await this.getSystemOverview();
-
-      // 3. Broadcast to all WebSocket listeners
-      this.broadcast({
-        type: 'stats',
-        timestamp: Date.now(),
-        data: overview,
-      });
+      // 2. Broadcast to all WebSocket listeners
+      await this.broadcast();
     } catch (err) {
       // ignore transient poll error
     } finally {
@@ -105,11 +226,6 @@ class TrafficService {
     if (!Array.isArray(stats) || stats.length === 0) return;
 
     for (const item of stats) {
-      // Patterns:
-      // user>>><email>>>>traffic>>>uplink
-      // user>>><email>>>>traffic>>>downlink
-      // inbound>>><tag>>>>traffic>>>uplink
-      // inbound>>><tag>>>>traffic>>>downlink
       const name = item.name || '';
       const value = parseInt(item.value || 0, 10);
       if (value <= 0) continue;
@@ -141,9 +257,12 @@ class TrafficService {
   }
 
   /**
-   * Gather full overview of system, engines, traffic, and inbounds
+   * Gather full overview of system, engines, traffic, and inbounds.
+   * Redacts sensitive process paths for non-admin viewers (C2).
    */
-  async getSystemOverview() {
+  async getSystemOverview(user = null) {
+    const isAdmin = Boolean(user && user.role === 'admin');
+
     // 1. System info
     const [cpu, mem, fsSize, currentLoad] = await Promise.all([
       si.cpu().catch(() => ({})),
@@ -159,6 +278,21 @@ class TrafficService {
       SingboxService.getStatus(),
       XrayService.getStatus(),
     ]);
+
+    // Redact internal host filesystem details for viewers (C2)
+    const safeSingbox = isAdmin ? singboxStatus : {
+      running: singboxStatus.running,
+      uptime: singboxStatus.uptime,
+      version: singboxStatus.version,
+      service: 'sing-box',
+    };
+
+    const safeXray = isAdmin ? xrayStatus : {
+      running: xrayStatus.running,
+      uptime: xrayStatus.uptime,
+      version: xrayStatus.version,
+      service: 'xray',
+    };
 
     // 3. Totals from database
     const inbounds = Inbound.findAll();
@@ -185,8 +319,8 @@ class TrafficService {
         uptime: osUptime(),
       },
       engines: {
-        singbox: singboxStatus,
-        xray: xrayStatus,
+        singbox: safeSingbox,
+        xray: safeXray,
       },
       totals: {
         totalUp,
@@ -212,5 +346,4 @@ function osUptime() {
   }
 }
 
-// Singleton instance
 module.exports = new TrafficService();

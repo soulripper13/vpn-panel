@@ -7,13 +7,18 @@ export const useAuthStore = create(
       isAuthenticated: false,
       user: null,
       token: null,
+      csrfToken: null,
 
-      login: (user, token) => {
-        set({ isAuthenticated: true, user, token })
+      login: (user, token, csrfToken = null) => {
+        set({ isAuthenticated: true, user, token, ...(csrfToken ? { csrfToken } : {}) })
+      },
+
+      setCsrfToken: (csrfToken) => {
+        set({ csrfToken })
       },
 
       logout: () => {
-        set({ isAuthenticated: false, user: null, token: null })
+        set({ isAuthenticated: false, user: null, token: null, csrfToken: null })
       },
     }),
     {
@@ -22,6 +27,7 @@ export const useAuthStore = create(
         isAuthenticated: state.isAuthenticated,
         user: state.user,
         token: state.token,
+        csrfToken: state.csrfToken,
       }),
     }
   )

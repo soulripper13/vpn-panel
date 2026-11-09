@@ -1,7 +1,7 @@
 [Unit]
 Description=VPN Panel - Unified sing-box & xray management
 Documentation=https://github.com/soulripper13/vpn-panel
-After=network.target sing-box.service
+After=network.target sing-box.service xray.service
 Wants=network.target
 
 [Service]
@@ -14,9 +14,17 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=vpn-panel
 
-# Security hardening
-NoNewPrivileges=false
+# Security hardening (C5)
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateDevices=true
 PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictRealtime=true
+LockPersonality=true
+ReadWritePaths=/opt/vpn-panel /etc/sing-box /etc/xray /usr/local/x-ui /var/log
 
 # Environment
 Environment=NODE_ENV=production

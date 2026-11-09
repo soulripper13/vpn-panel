@@ -119,7 +119,7 @@ class PanelUpdaterService {
    * Get current panel version
    */
   static getCurrentVersion() {
-    let version = '1.2.0';
+    let version = '1.3.0';
     let commit = '';
     let shortCommit = '';
     let buildDate = new Date().toISOString().split('T')[0];
@@ -437,16 +437,19 @@ class PanelUpdaterService {
       // ── Step 5: Install/update backend dependencies (progress: 85%) ────────
       updateState.step = 'dependencies';
       updateState.progress = 85;
-      addLog('Updating production npm dependencies (npm install --production)...');
+      addLog('Updating production npm dependencies with package-lock...');
 
       try {
-        await execAsync('npm install --production --silent', {
+        const installCmd = fs.existsSync(path.join(targetBackend, 'package-lock.json'))
+          ? 'npm ci --omit=dev --silent 2>/dev/null || npm install --production --silent'
+          : 'npm install --production --silent';
+        await execAsync(installCmd, {
           cwd: targetBackend,
           timeout: 120000,
         });
         addLog('Dependencies updated successfully.');
       } catch (npmErr) {
-        addLog(`Warning: npm install warning (${npmErr.message}) - continuing.`);
+        addLog(`Warning: dependency install warning (${npmErr.message}) - continuing.`);
       }
 
       // ── Step 6: Clean up temp files (progress: 92%) ────────────────────────

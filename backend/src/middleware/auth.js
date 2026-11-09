@@ -33,7 +33,18 @@ function requireAdmin(req, res, next) {
   });
 }
 
+/**
+ * Enforces admin role for state-mutating HTTP methods (C4)
+ */
+function requireAdminForMutations(req, res, next) {
+  if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(req.method.toUpperCase())) {
+    return requireAdmin(req, res, next);
+  }
+  return next();
+}
+
 module.exports = {
   requireAuth,
   requireAdmin,
+  requireAdminForMutations,
 };

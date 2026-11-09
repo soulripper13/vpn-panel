@@ -9,14 +9,62 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { exec, execSync } = require('child_process');
+const { exec, execFile } = require('child_process');
 const util = require('util');
 const https = require('https');
+const crypto = require('crypto');
 const cfg = require('../config/app-config');
 const SingboxService = require('./singbox');
 const XrayService = require('./xray');
 
 const execAsync = util.promisify(exec);
+const execFileAsync = util.promisify(execFile);
+
+/**
+ * Require a SHA-256 digest published for this exact release asset (H5).
+ */
+async function verifyArchiveChecksum(archivePath, assetName, releaseAssets) {
+  const fileBuf = fs.readFileSync(archivePath);
+  const computedHash = crypto.createHash('sha256').update(fileBuf).digest('hex').toLowerCase();
+  const asset = (releaseAssets || []).find((entry) => entry.name === assetName);
+  const publishedDigest = asset?.digest?.match(/^sha256:([a-f0-9]{64})$/i)?.[1]?.toLowerCase();
+
+  if (publishedDigest) {
+    if (publishedDigest !== computedHash) {
+      throw new Error(`SHA-256 verification failed for ${assetName}`);
+    }
+    return true;
+  }
+
+  const checksumAsset = (releaseAssets || []).find((entry) => {
+    const name = (entry.name || '').toLowerCase();
+    return name.includes('sha256') || name.includes('checksum');
+  });
+  if (!checksumAsset) {
+    throw new Error(`No SHA-256 digest or checksum manifest is available for ${assetName}; refusing the update.`);
+  }
+
+  const checksumDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vpn-panel-checksum-'));
+  const checksumPath = path.join(checksumDir, 'checksums.txt');
+  try {
+    await downloadFile(checksumAsset.url, checksumPath, 1);
+    const lines = fs.readFileSync(checksumPath, 'utf8').split(/\r?\n/);
+    const matchingLine = lines.map((line) => line.match(/^\s*([a-f0-9]{64})\s+\*?(.+?)\s*$/i))
+      .find((match) => match && path.basename(match[2].trim()) === assetName);
+
+    if (!matchingLine) {
+      throw new Error(`Checksum manifest does not contain an entry for ${assetName}`);
+    }
+
+    const expectedHash = matchingLine[1].toLowerCase();
+    if (expectedHash !== computedHash) {
+      throw new Error(`SHA-256 verification failed for ${assetName}`);
+    }
+    return true;
+  } finally {
+    try { fs.rmSync(checksumDir, { recursive: true, force: true }); } catch {}
+  }
+}
 
 // Cache release info for 5 minutes
 const cache = {
@@ -69,11 +117,17 @@ function fetchJson(url) {
 /**
  * Download file to target destination
  */
-async function downloadFile(url, destPath) {
-  // Use curl with redirect support
-  const cmd = `curl -sSL --connect-timeout 15 -o "${destPath}" "${url}"`;
-  await execAsync(cmd);
-  if (!fs.existsSync(destPath) || fs.statSync(destPath).size < 1024) {
+async function downloadFile(url, destPath, minBytes = 1024) {
+  let parsedUrl;
+  try { parsedUrl = new URL(url); } catch { throw new Error('Invalid download URL'); }
+  if (parsedUrl.protocol !== 'https:') throw new Error('Updater downloads must use HTTPS');
+
+  await execFileAsync('curl', [
+    '--fail', '--silent', '--show-error', '--location',
+    '--connect-timeout', '15', '--max-time', '180',
+    '--output', destPath, url,
+  ]);
+  if (!fs.existsSync(destPath) || fs.statSync(destPath).size < minBytes) {
     throw new Error('Downloaded file is missing or too small');
   }
 }
@@ -283,6 +337,7 @@ class BinaryUpdaterService {
 
     try {
       await downloadFile(asset.url, tmpArchive);
+      await verifyArchiveChecksum(tmpArchive, asset.name, release.assets);
       fs.mkdirSync(tmpDir, { recursive: true });
       await execAsync(`tar -xzf "${tmpArchive}" -C "${tmpDir}"`);
 
@@ -365,6 +420,7 @@ class BinaryUpdaterService {
 
     try {
       await downloadFile(asset.url, tmpArchive);
+      await verifyArchiveChecksum(tmpArchive, asset.name, release.assets);
       fs.mkdirSync(tmpDir, { recursive: true });
 
       // Unzip archive

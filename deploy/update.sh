@@ -89,6 +89,7 @@ if [[ -d "${SOURCE_DIR}/backend" ]]; then
         mkdir -p "${BACKEND_DIR}"
         cp -rf "${SOURCE_DIR}/backend/src" "${BACKEND_DIR}/"
         cp -f "${SOURCE_DIR}/backend/package.json" "${BACKEND_DIR}/"
+        [[ -f "${SOURCE_DIR}/backend/package-lock.json" ]] && cp -f "${SOURCE_DIR}/backend/package-lock.json" "${BACKEND_DIR}/"
         [[ -d "${SOURCE_DIR}/backend/public" ]] && cp -rf "${SOURCE_DIR}/backend/public" "${BACKEND_DIR}/"
     fi
     success "Backend files updated."
@@ -97,8 +98,12 @@ else
 fi
 
 cd "${BACKEND_DIR}"
-info "Installing/updating dependencies..."
-npm install --production --silent
+info "Installing/updating dependencies with package-lock..."
+if [[ -f "${BACKEND_DIR}/package-lock.json" ]]; then
+    npm ci --omit=dev --silent 2>/dev/null || npm install --production --silent
+else
+    npm install --production --silent
+fi
 success "Dependencies updated."
 cd -
 

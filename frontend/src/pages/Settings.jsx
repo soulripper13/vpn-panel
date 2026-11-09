@@ -20,6 +20,16 @@ import Spinner from '../components/ui/Spinner'
 import Badge from '../components/ui/Badge'
 import PanelUpdateModal from '../components/modals/PanelUpdateModal'
 
+const EDITABLE_SETTING_KEYS = [
+  'server_ip',
+  'panel_port',
+  'web_base_path',
+  'cert_fullchain',
+  'cert_privkey',
+  'singbox_bin',
+  'xray_bin',
+]
+
 export default function Settings() {
   const [settings, setSettings] = useState({
     server_ip: typeof window !== 'undefined' ? (window.location.hostname || '') : '',
@@ -117,7 +127,12 @@ export default function Settings() {
       }
       targetBase = targetBase.replace(/\/$/, '')
 
-      const res = await api.put('/settings', settings)
+      const editableSettings = Object.fromEntries(
+        EDITABLE_SETTING_KEYS
+          .filter((key) => settings[key] !== undefined)
+          .map((key) => [key, settings[key]])
+      )
+      const res = await api.put('/settings', editableSettings)
       if (res.data.success) {
         if (targetBase !== prevBase) {
           toast.success(`Web secret path updated to "${targetBase || '/'}"! Redirecting...`, { duration: 3000 })

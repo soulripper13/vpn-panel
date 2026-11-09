@@ -118,12 +118,40 @@ export default function ClientModal({ isOpen, onClose, inbound, onUpdate }) {
     }
   }
 
-  const handleCopyLink = (client) => {
-    if (!client.link) return
-    navigator.clipboard.writeText(client.link)
-    setCopiedId(client.id)
-    toast.success('Link copied!')
-    setTimeout(() => setCopiedId(null), 2000)
+  const handleCopyLink = async (client) => {
+    try {
+      let link = client.link
+      if (!link) {
+        const res = await api.post(`/inbounds/${inbound.id}/clients/${client.id}/reveal`)
+        link = res.data?.data?.link
+      }
+      if (link) {
+        await navigator.clipboard.writeText(link)
+        setCopiedId(client.id)
+        toast.success('Link copied!')
+        setTimeout(() => setCopiedId(null), 2000)
+      } else {
+        toast.error('No configuration link available')
+      }
+    } catch {
+      toast.error('Failed to copy link')
+    }
+  }
+
+  const handleOpenQR = async (client) => {
+    try {
+      const res = await api.post(`/inbounds/${inbound.id}/clients/${client.id}/reveal`)
+      const data = res.data.data
+      setActiveQR({
+        title: client.email,
+        link: data.link,
+        clashYaml: data.clashYaml,
+        singboxJson: data.singboxJson,
+        client: data,
+      })
+    } catch (err) {
+      toast.error('Failed to load credentials: ' + (err.response?.data?.message || err.message))
+    }
   }
 
   return (
@@ -278,15 +306,7 @@ export default function ClientModal({ isOpen, onClose, inbound, onUpdate }) {
                   </button>
 
                   <button
-                    onClick={() =>
-                      setActiveQR({
-                        title: c.email,
-                        link: c.link,
-                        clashYaml: c.clashYaml,
-                        singboxJson: c.singboxJson,
-                        client: c,
-                      })
-                    }
+                    onClick={() => handleOpenQR(c)}
                     title="QR Code & Config Exporters"
                     className="p-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 transition"
                   >

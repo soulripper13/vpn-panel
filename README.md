@@ -69,13 +69,11 @@ bash <(curl -Ls https://raw.githubusercontent.com/soulripper13/vpn-panel/main/de
 
 ---
 
-## 🔐 Default Credentials
+## 🔐 Initial Access & Security
 
-- **URL:** `http://<SERVER_IP>:2096`
-- **Username:** `admin`
-- **Password:** `admin123`
-
-*(Remember to change the admin password in the Settings page upon initial login.)*
+- **URL:** `https://<SERVER_IP>:2096` (or `http://` for local test/dev setups)
+- **Initial Setup:** The installer generates secure random credentials or prompts you to configure them in `/opt/vpn-panel/.env` (`ADMIN_USERNAME` and `ADMIN_PASSWORD`).
+- **Security Notice:** Change default credentials immediately upon first login. When deploying to production, configure SSL/TLS certificates and place the management interface behind an authenticated proxy or VPN.
 
 ---
 

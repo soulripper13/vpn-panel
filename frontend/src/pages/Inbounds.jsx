@@ -210,18 +210,25 @@ export default function Inbounds() {
                           <UserPlus className="w-4 h-4" />
                         </button>
 
-                        {inb.clients?.[0]?.link && (
+                        {inb.clients?.[0] && (
                           <button
-                            onClick={() =>
-                              setQrModalData({
-                                title: inb.remark || inb.tag,
-                                link: inb.clients[0].link,
-                                clashYaml: inb.clients[0].clashYaml,
-                                singboxJson: inb.clients[0].singboxJson,
-                                inbound: inb,
-                                client: inb.clients[0],
-                              })
-                            }
+                            onClick={async () => {
+                              try {
+                                const c = inb.clients[0]
+                                const res = await api.post(`/inbounds/${inb.id}/clients/${c.id}/reveal`)
+                                const data = res.data.data
+                                setQrModalData({
+                                  title: inb.remark || inb.tag,
+                                  link: data.link,
+                                  clashYaml: data.clashYaml,
+                                  singboxJson: data.singboxJson,
+                                  inbound: inb,
+                                  client: data,
+                                })
+                              } catch (err) {
+                                toast.error('Failed to load credentials: ' + (err.response?.data?.message || err.message))
+                              }
+                            }}
                             title="Show QR Code"
                             className="p-1.5 rounded-lg bg-indigo-600/15 hover:bg-indigo-600/25 text-indigo-300 transition"
                           >

@@ -79,12 +79,59 @@ export default function Clients() {
     )
   })
 
-  const handleCopyLink = (c) => {
-    if (!c.link) return
-    navigator.clipboard.writeText(c.link)
-    setCopiedEmail(c.email)
-    toast.success('Link copied to clipboard')
-    setTimeout(() => setCopiedEmail(null), 2000)
+  const handleCopyLink = async (c) => {
+    try {
+      let link = c.link
+      if (!link) {
+        const res = await api.post(`/inbounds/${c.inboundId}/clients/${c.id}/reveal`)
+        link = res.data?.data?.link
+      }
+      if (link) {
+        await navigator.clipboard.writeText(link)
+        setCopiedEmail(c.email)
+        toast.success('Link copied to clipboard')
+        setTimeout(() => setCopiedEmail(null), 2000)
+      } else {
+        toast.error('No configuration link available')
+      }
+    } catch {
+      toast.error('Failed to copy link')
+    }
+  }
+
+  const handleOpenQR = async (c) => {
+    const parentInbound = inbounds.find((i) => i.id === c.inboundId)
+    try {
+      const res = await api.post(`/inbounds/${c.inboundId}/clients/${c.id}/reveal`)
+      const data = res.data.data
+      setActiveQR({
+        title: `${c.email} (${c.inboundRemark})`,
+        link: data.link,
+        clashYaml: data.clashYaml,
+        singboxJson: data.singboxJson,
+        inbound: parentInbound,
+        client: data,
+      })
+    } catch (err) {
+      toast.error('Failed to load client credentials: ' + (err.response?.data?.message || err.message))
+    }
+  }
+
+  const handleRotateSubToken = async (c) => {
+    if (!confirm(`Rotate subscription token for "${c.email}"? Any previously issued subscription links will immediately stop working.`)) return
+    try {
+      const res = await api.post(`/inbounds/${c.inboundId}/clients/${c.id}/rotate-sub-token`)
+      const subUrl = res.data?.data?.subUrl
+      if (subUrl) {
+        await navigator.clipboard.writeText(subUrl)
+        toast.success('New subscription URL copied to clipboard!')
+      } else {
+        toast.success('Subscription token rotated successfully')
+      }
+      queryClient.invalidateQueries({ queryKey: ['inbounds'] })
+    } catch {
+      toast.error('Failed to rotate subscription token')
+    }
   }
 
   const handleToggleClient = async (c) => {
@@ -300,27 +347,24 @@ export default function Clients() {
                         </button>
                         <button
                           onClick={() => handleCopyLink(c)}
-                          title="Copy Link"
+                          title="Copy Link (Reveals on demand)"
                           className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
                         >
                           {copiedEmail === c.email ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
                         </button>
                         <button
-                          onClick={() => {
-                            const parentInbound = inbounds.find((i) => i.id === c.inboundId)
-                            setActiveQR({
-                              title: `${c.email} (${c.inboundRemark})`,
-                              link: c.link,
-                              clashYaml: c.clashYaml,
-                              singboxJson: c.singboxJson,
-                              inbound: parentInbound,
-                              client: c,
-                            })
-                          }}
+                          onClick={() => handleOpenQR(c)}
                           title="Show QR Code & Subscription"
                           className="p-1.5 rounded-lg bg-indigo-600/15 hover:bg-indigo-600/25 text-indigo-300 transition"
                         >
                           <QrCode className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleRotateSubToken(c)}
+                          title="Rotate Subscription Token (Invalidates old link)"
+                          className="p-1.5 rounded-lg bg-emerald-600/15 hover:bg-emerald-600/25 text-emerald-300 transition"
+                        >
+                          <RefreshCw className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() => handleDeleteClient(c)}

@@ -6,7 +6,7 @@
 
 'use strict';
 
-const { exec, execSync, spawn } = require('child_process');
+const { exec, execFile, execSync, spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const util = require('util');
@@ -17,6 +17,24 @@ const Settings = require('../models/Settings');
 const { generateXrayInbound } = require('../utils/config-generator');
 
 const execAsync = util.promisify(exec);
+const execFileAsync = util.promisify(execFile);
+
+/**
+ * Filter client eligibility by quota and expiry (C6)
+ */
+function isClientActive(client) {
+  if (!client.enable) return false;
+  const now = Math.floor(Date.now() / 1000);
+  if (client.expiry_time && client.expiry_time > 0) {
+    const exp = client.expiry_time > 10000000000 ? Math.floor(client.expiry_time / 1000) : client.expiry_time;
+    if (now > exp) return false;
+  }
+  if (client.total_bytes_limit && client.total_bytes_limit > 0) {
+    const used = (client.up_bytes || 0) + (client.down_bytes || 0);
+    if (used >= client.total_bytes_limit) return false;
+  }
+  return true;
+}
 
 class XrayService {
   /**
@@ -162,17 +180,17 @@ class XrayService {
   }
 
   /**
-   * Validate and write config to disk
+   * Validate and write config to disk with restricted permissions (0600)
    */
   static async writeConfig(configObject) {
     const jsonStr = JSON.stringify(configObject, null, 2);
     const dir = path.dirname(cfg.XRAY_CONFIG);
     if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+      fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     }
     const tempPath = path.join(dir, 'config.tmp.json');
 
-    fs.writeFileSync(tempPath, jsonStr, 'utf8');
+    fs.writeFileSync(tempPath, jsonStr, { encoding: 'utf8', mode: 0o600 });
 
     // Test with xray -test
     try {
@@ -186,11 +204,13 @@ class XrayService {
     }
 
     fs.renameSync(tempPath, cfg.XRAY_CONFIG);
+    try { fs.chmodSync(cfg.XRAY_CONFIG, 0o600); } catch {}
     return true;
   }
 
   /**
    * Generate complete xray config.json from database inbounds and clients
+   * Enforces quotas, expiry, and blocks private/loopback/metadata destinations (C6, H6)
    */
   static async generateAndApplyConfig() {
     const inbounds = Inbound.findAll({ engine: 'xray' }).filter((i) => Boolean(i.enabled));
@@ -208,7 +228,8 @@ class XrayService {
     });
 
     for (const inb of inbounds) {
-      const clients = Client.findByInbound(inb.id).filter((c) => Boolean(c.enable));
+      // Strictly include only active, unexpired, and under-limit clients (C6)
+      const clients = Client.findByInbound(inb.id).filter(isClientActive);
       const settings = inb.settings || (typeof inb.settings_json === 'string' ? JSON.parse(inb.settings_json || '{}') : inb.settings_json) || {};
       const streamSettings = inb.stream_settings || (typeof inb.stream_settings_json === 'string' ? JSON.parse(inb.stream_settings_json || '{}') : inb.stream_settings_json) || {};
 
@@ -295,7 +316,18 @@ class XrayService {
           },
           {
             type: 'field',
-            ip: ['geoip:private'],
+            ip: [
+              'geoip:private',
+              '127.0.0.0/8',
+              '10.0.0.0/8',
+              '172.16.0.0/12',
+              '192.168.0.0/16',
+              '169.254.0.0/16',
+              '100.64.0.0/10',
+              '::1/128',
+              'fc00::/7',
+              'fe80::/10',
+            ],
             outboundTag: 'blocked',
           },
         ],
@@ -308,11 +340,12 @@ class XrayService {
   }
 
   /**
-   * Get recent log lines
+   * Get recent log lines with bounded line count (M1)
    */
   static async getLogs(lines = 100) {
+    const safeLines = Math.min(Math.max(parseInt(lines, 10) || 100, 1), 500);
     try {
-      const { stdout } = await execAsync(`journalctl -u ${cfg.XRAY_SERVICE} -n ${lines} --no-pager 2>/dev/null || journalctl -u x-ui -n ${lines} --no-pager`);
+      const { stdout } = await execAsync(`journalctl -u ${cfg.XRAY_SERVICE} -n ${safeLines} --no-pager 2>/dev/null || journalctl -u x-ui -n ${safeLines} --no-pager`);
       return stdout;
     } catch (err) {
       return `Unable to fetch Xray logs: ${err.message}`;

@@ -7,6 +7,23 @@
 
 const db = require('../config/database');
 
+// Only panel configuration is returned to API callers. Internal settings such
+// as the session signing secret must never be included in generic settings data.
+const PUBLIC_SETTING_KEYS = new Set([
+  'panel_port',
+  'web_base_path',
+  'server_ip',
+  'cert_fullchain',
+  'cert_privkey',
+  'singbox_bin',
+  'singbox_config',
+  'xray_bin',
+  'xray_config',
+  'xray_api_port',
+  'traffic_reset_day',
+  'panel_ssl',
+]);
+
 class Settings {
   /**
    * Get a single setting value.
@@ -46,7 +63,9 @@ class Settings {
    */
   static getAll() {
     const rows = db.prepare(`SELECT key, value FROM settings`).all();
-    return Object.fromEntries(rows.map((r) => [r.key, r.value]));
+    return Object.fromEntries(
+      rows.filter((r) => PUBLIC_SETTING_KEYS.has(r.key)).map((r) => [r.key, r.value]),
+    );
   }
 
   /**

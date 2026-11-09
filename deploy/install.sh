@@ -454,8 +454,12 @@ fi
 header "Installing Backend Dependencies"
 
 cd "${BACKEND_DIR}"
-info "Running npm install --production ..."
-npm install --production --silent
+info "Installing dependencies from package-lock.json..."
+if [[ -f "${BACKEND_DIR}/package-lock.json" ]]; then
+    npm ci --omit=dev --silent 2>/dev/null || npm install --production --silent
+else
+    npm install --production --silent
+fi
 success "Backend dependencies installed."
 cd -
 
@@ -531,7 +535,9 @@ header "Setting Permissions"
 
 chown -R root:root "${PANEL_DIR}"
 chmod -R 755 "${PANEL_DIR}"
-chmod 750 "${PANEL_DIR}/data" "${PANEL_DIR}/.env" 2>/dev/null || true
+chmod 700 "${PANEL_DIR}/data" 2>/dev/null || true
+chmod 600 "${PANEL_DIR}/data/panel.db" 2>/dev/null || true
+chmod 600 "${ENV_FILE}" 2>/dev/null || true
 chmod 755 "${FRONTEND_DIR}"
 chmod +x "${PANEL_DIR}/deploy/"*.sh 2>/dev/null || true
 chmod +x /usr/local/bin/vpn-panel /usr/local/bin/panel /usr/bin/vpn-panel 2>/dev/null || true
@@ -575,7 +581,11 @@ if [[ -n "${CLEAN_PATH}" ]]; then
 else
     FINAL_PATH="/"
 fi
-SERVER_URL="http://${SERVER_HOST}:${PANEL_PORT}${FINAL_PATH}"
+PROTOCOL="http"
+if [[ -n "${CERT_FULLCHAIN:-}" && -f "${CERT_FULLCHAIN}" ]]; then
+    PROTOCOL="https"
+fi
+SERVER_URL="${PROTOCOL}://${SERVER_HOST}:${PANEL_PORT}${FINAL_PATH}"
 echo ""
 echo -e "${BOLD}${GREEN}╔══════════════════════════════════════════════╗${NC}"
 echo -e "${BOLD}${GREEN}║      VPN Panel Installed Successfully!       ║${NC}"
