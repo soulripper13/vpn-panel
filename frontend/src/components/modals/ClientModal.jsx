@@ -102,7 +102,15 @@ export default function ClientModal({ isOpen, onClose, inbound, onUpdate }) {
       })
 
       if (res.data.success) {
-        setClients((prev) => [...prev, res.data.data])
+        const createdClient = res.data.data
+        setClients((prev) => [...prev, createdClient])
+        setActiveQR({
+          title: createdClient.email,
+          link: createdClient.link,
+          clashYaml: createdClient.clashYaml,
+          singboxJson: createdClient.singboxJson,
+          client: createdClient,
+        })
         toast.success(`Client "${newEmail}" added successfully`)
         setNewEmail('')
         setNewUuid(generateUUID())
@@ -147,7 +155,7 @@ export default function ClientModal({ isOpen, onClose, inbound, onUpdate }) {
         link: data.link,
         clashYaml: data.clashYaml,
         singboxJson: data.singboxJson,
-        client: data,
+        client: { ...data, ...(client.subUrl ? { subUrl: client.subUrl } : {}) },
       })
     } catch (err) {
       toast.error('Failed to load credentials: ' + (err.response?.data?.message || err.message))

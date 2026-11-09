@@ -336,7 +336,7 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess }) {
       const res = await api.post('/inbounds', payload)
       if (res.data.success) {
         toast.success(`Inbound ${remark} created and deployed!`)
-        onSuccess()
+        onSuccess(res.data.data)
         onClose()
       }
     } catch (err) {

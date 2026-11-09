@@ -1,4 +1,5 @@
 import React from 'react'
+import { useOutletContext } from 'react-router-dom'
 import {
   ArrowUpRight,
   ArrowDownRight,
@@ -13,7 +14,6 @@ import StatCard from '../components/ui/StatCard'
 import EngineCard from '../components/ui/EngineCard'
 import { useStats } from '../hooks/useStats'
 import { useEngine } from '../hooks/useEngine'
-import { useWebSocket } from '../hooks/useWebSocket'
 import { formatBytes } from '../utils/format'
 import {
   ResponsiveContainer,
@@ -27,7 +27,7 @@ import {
 
 export default function Dashboard() {
   const { overview: polledOverview, chartData } = useStats()
-  const { data: wsData } = useWebSocket()
+  const { wsData } = useOutletContext()
   const { performAction } = useEngine()
 
   // Prefer live WebSocket data, fallback to REST polled overview

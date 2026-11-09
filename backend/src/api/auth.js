@@ -139,7 +139,7 @@ router.post('/logout', requireAuth, (req, res) => {
         data: null,
       });
     }
-    const cookieOptions = { path: '/', httpOnly: true, sameSite: 'lax' };
+    const cookieOptions = { path: '/', httpOnly: true, sameSite: 'lax', secure: Boolean(req.secure) };
     res.clearCookie('vpn_sid', cookieOptions);
     // Remove cookies issued by older panel versions as well.
     res.clearCookie('connect.sid', cookieOptions);

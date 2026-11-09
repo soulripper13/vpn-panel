@@ -42,7 +42,7 @@ function getServerHost(req) {
   if (configured && configured.trim()) return configured.trim();
 
   // Validate Host header against safe domain/IP pattern
-  const rawHost = (req.headers['x-forwarded-host'] || req.headers.host || '127.0.0.1').split(':')[0].trim();
+  const rawHost = (req.hostname || '127.0.0.1').trim();
   if (/^[a-zA-Z0-9.-]+$/.test(rawHost)) {
     return rawHost;
   }

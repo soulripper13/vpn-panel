@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import {
   X,
   Copy,
@@ -15,6 +15,7 @@ import {
   Globe,
 } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
+import api from '../../utils/api'
 import {
   generateClashYaml,
   generateSingboxJson,
@@ -37,12 +38,17 @@ export default function QRModal({
   const [subFormat, setSubFormat] = useState('clash') // 'clash' | 'base64' | 'singbox'
   const [copiedKey, setCopiedKey] = useState(null)
   const [useRawDelimiters, setUseRawDelimiters] = useState(false)
+  const [subscriptionUrl, setSubscriptionUrl] = useState(client?.subUrl || '')
+  const [issuingSubscription, setIssuingSubscription] = useState(false)
+
+  useEffect(() => {
+    setSubscriptionUrl(client?.subUrl || '')
+  }, [client?.id, client?.subUrl, isOpen])
 
   if (!isOpen) return null
 
   // Derive host dynamically from current window location without hardcoding
   const host = typeof window !== 'undefined' ? (window.location.hostname || '') : ''
-  const origin = typeof window !== 'undefined' ? (window.location.origin || '') : ''
 
   const { settings, streamSettings } = extractSettings(inbound)
   const type = (inbound?.type || '').toLowerCase()
@@ -66,14 +72,33 @@ export default function QRModal({
   const version = settings?.shadowtlsVersion || settings?.version || 3
   const remark = client?.remark || client?.email || inbound?.remark || 'VPN'
 
-  // Build subscription URL dynamically
-  const subToken = client?.uuid || client?.email || client?.id || (inbound ? `inbound-${inbound.id}` : '')
-  const baseSubUrl = client?.subUrl || (subToken ? `${origin}/api/sub/${encodeURIComponent(subToken)}` : '')
+  // Raw tokens are never reconstructed from UUIDs, emails, or database IDs.
+  const baseSubUrl = subscriptionUrl
   const finalSubUrl = baseSubUrl
     ? (subFormat === 'clash'
         ? `${baseSubUrl}?format=clash`
         : (subFormat === 'singbox' ? `${baseSubUrl}?format=singbox` : `${baseSubUrl}?format=base64`))
     : ''
+
+  const handleIssueSubscription = async () => {
+    if (!inbound?.id || !client?.id || issuingSubscription) return
+    if (!window.confirm('Issue a new subscription URL? This will invalidate any previously issued subscription URL for this client.')) {
+      return
+    }
+
+    try {
+      setIssuingSubscription(true)
+      const res = await api.post(`/inbounds/${inbound.id}/clients/${client.id}/rotate-sub-token`)
+      const nextUrl = res.data?.data?.subUrl
+      if (!nextUrl) throw new Error('The server did not return a subscription URL')
+      setSubscriptionUrl(nextUrl)
+      toast.success('New subscription URL issued. Previous URLs are now invalid.')
+    } catch (err) {
+      toast.error(err.response?.data?.message || err.message || 'Failed to issue subscription URL')
+    } finally {
+      setIssuingSubscription(false)
+    }
+  }
 
   // Build dynamic single links based on format toggle
   let activeLink = link
@@ -283,6 +308,22 @@ export default function QRModal({
                   )}
                 </p>
               </div>
+
+              {!baseSubUrl && (
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-amber-500/10 border border-amber-500/25 rounded-xl p-3">
+                  <p className="text-[11px] text-amber-100/90 leading-relaxed">
+                    This client has no recoverable subscription URL. Issuing one creates a fresh secret link and invalidates any previous link.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleIssueSubscription}
+                    disabled={issuingSubscription}
+                    className="shrink-0 px-3 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-60 text-white text-xs font-medium transition"
+                  >
+                    {issuingSubscription ? 'Issuing…' : 'Issue new URL'}
+                  </button>
+                </div>
+              )}
 
               {/* Subscription QR Code Box */}
               <div className="flex flex-col items-center justify-center p-5 bg-white rounded-xl shadow-inner mx-auto w-fit">

@@ -89,7 +89,7 @@ const updateClientSchema = Joi.object({
 function getServerHost(req) {
   const configured = Settings.get('server_ip');
   if (configured && configured.trim()) return configured.trim();
-  const rawHost = (req.headers['x-forwarded-host'] || req.headers.host || '127.0.0.1').split(':')[0].trim();
+  const rawHost = (req.hostname || '127.0.0.1').trim();
   if (/^[a-zA-Z0-9.-]+$/.test(rawHost)) return rawHost;
   return '127.0.0.1';
 }
@@ -101,6 +101,32 @@ function getBaseSubUrl(req) {
   const port = reqHost.includes(':') ? reqHost.split(':')[1] : '';
   const portSuffix = port ? `:${port}` : '';
   return `${proto}://${host}${portSuffix}`;
+}
+
+const INBOUND_SECRET_FIELD = /(password|private.?key|secret|token|credential|auth|key.?file)/i;
+
+function redactInboundSecrets(value) {
+  if (Array.isArray(value)) return value.map(redactInboundSecrets);
+  if (!value || typeof value !== 'object') return value;
+
+  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [
+    key,
+    INBOUND_SECRET_FIELD.test(key) ? (entry ? '••••••••' : entry) : redactInboundSecrets(entry),
+  ]));
+}
+
+function toSafeInbound(inbound, user) {
+  if (user?.role === 'admin') return inbound;
+
+  const settings = redactInboundSecrets(inbound.settings || {});
+  const streamSettings = redactInboundSecrets(inbound.stream_settings || {});
+  return {
+    ...inbound,
+    settings,
+    settings_json: JSON.stringify(settings),
+    stream_settings: streamSettings,
+    stream_settings_json: JSON.stringify(streamSettings),
+  };
 }
 
 /**
@@ -145,7 +171,7 @@ router.get('/', (req, res) => {
     const safeClients = clients.map((c) => Client.toSafeObject(c, false));
 
     return {
-      ...inb,
+      ...toSafeInbound(inb, req.session.user),
       clientCount: clients.length,
       clients: safeClients,
     };
@@ -202,7 +228,7 @@ router.get('/:id', (req, res) => {
   return res.json({
     success: true,
     data: {
-      ...inbound,
+      ...toSafeInbound(inbound, req.session.user),
       clients,
     },
   });
@@ -294,15 +320,32 @@ router.post('/', validateBody(createInboundSchema), async (req, res) => {
 
     const inbound = Inbound.findById(inboundId);
     const createdClients = Client.findByInbound(inboundId).map((c) => Client.toSafeObject(c, false));
-
     const baseSubUrl = getBaseSubUrl(req);
+    const initialSubUrl = createdClientInfo
+      ? `${baseSubUrl}/api/sub/${createdClientInfo.rawSubToken}`
+      : null;
+    const initialClient = createdClientInfo ? Client.findById(createdClientInfo.id) : null;
+    const initialHost = initialClient ? getServerHost(req) : null;
+    const initialClientData = initialClient ? {
+      ...Client.toSafeObject(initialClient, true),
+      subUrl: initialSubUrl,
+      link: generateClientLink(inbound, initialClient, initialHost),
+      clashYaml: generateClashConfig(inbound, initialClient, initialHost),
+      singboxJson: generateSingboxConfig(inbound, initialClient, initialHost),
+      hy2Config: generateHysteriaCliConfig(inbound, initialClient, initialHost),
+    } : null;
+
+    // This response contains the first client's one-time subscription token and
+    // credentials; it must never be stored by an intermediary cache.
+    res.setHeader('Cache-Control', 'no-store, private');
     return res.status(201).json({
       success: true,
       message: 'Inbound created successfully',
       data: {
         ...inbound,
         clients: createdClients,
-        initialSubUrl: createdClientInfo ? `${baseSubUrl}/api/sub/${createdClientInfo.rawSubToken}` : null,
+        initialSubUrl,
+        initialClient: initialClientData,
       },
     });
   } catch (err) {
@@ -497,6 +540,8 @@ router.post('/:id/clients', validateBody(clientSchema), async (req, res) => {
     const host = getServerHost(req);
     const baseSubUrl = getBaseSubUrl(req);
 
+    // The one-time token and export values are credentials, not cacheable API data.
+    res.setHeader('Cache-Control', 'no-store, private');
     return res.status(201).json({
       success: true,
       message: 'Client added successfully',
@@ -505,6 +550,9 @@ router.post('/:id/clients', validateBody(clientSchema), async (req, res) => {
         rawSubToken,
         subUrl: `${baseSubUrl}/api/sub/${rawSubToken}`,
         link: generateClientLink(inbound, client, host),
+        clashYaml: generateClashConfig(inbound, client, host),
+        singboxJson: generateSingboxConfig(inbound, client, host),
+        hy2Config: generateHysteriaCliConfig(inbound, client, host),
       },
     });
   } catch (err) {
@@ -591,6 +639,8 @@ router.post('/:id/clients/:clientId/reveal', requireAdmin, async (req, res) => {
     const { inbound, client } = pair;
     const host = getServerHost(req);
 
+    res.setHeader('Cache-Control', 'no-store, private');
+
     logAudit({
       userId: req.session.user.id,
       username: req.session.user.username,
@@ -631,6 +681,8 @@ router.post('/:id/clients/:clientId/rotate-sub-token', requireAdmin, async (req,
     const newRawToken = Client.rotateSubToken(client.id);
     const baseSubUrl = getBaseSubUrl(req);
 
+    res.setHeader('Cache-Control', 'no-store, private');
+
     logAudit({
       userId: req.session.user.id,
       username: req.session.user.username,
@@ -658,7 +710,7 @@ router.post('/:id/clients/:clientId/rotate-sub-token', requireAdmin, async (req,
  * GET /api/inbounds/:id/clients/:clientId/qr
  * Authenticated QR retrieval with IDOR check
  */
-router.get('/:id/clients/:clientId/qr', async (req, res) => {
+router.get('/:id/clients/:clientId/qr', requireAdmin, async (req, res) => {
   try {
     const pair = getInboundAndClient(req.params.id, req.params.clientId);
     if (!pair) {
@@ -669,6 +721,17 @@ router.get('/:id/clients/:clientId/qr', async (req, res) => {
     const host = getServerHost(req);
     const link = generateClientLink(inbound, client, host);
     const qrDataUrl = await generateQRCode(link);
+
+    res.setHeader('Cache-Control', 'no-store, private');
+    logAudit({
+      userId: req.session.user.id,
+      username: req.session.user.username,
+      ip: req.ip || '127.0.0.1',
+      action: 'reveal_client_qr',
+      target: `client:${client.id}`,
+      details: { email: client.email },
+      status: 'success',
+    });
 
     return res.json({
       success: true,

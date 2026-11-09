@@ -4,7 +4,7 @@ import { useAuthStore } from '../../store/authStore'
 import api, { getBasePath } from '../../utils/api'
 import toast from 'react-hot-toast'
 
-export default function Header({ onMenuClick }) {
+export default function Header({ onMenuClick, wsConnected = false }) {
   const { user, logout } = useAuthStore()
 
   const handleApplyAll = async () => {
@@ -39,8 +39,14 @@ export default function Header({ onMenuClick }) {
         >
           <Menu className="w-5 h-5" />
         </button>
-        <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-          ● Live Sync
+        <span
+          aria-live="polite"
+          title={wsConnected ? 'Live dashboard updates are connected' : 'Live dashboard updates are reconnecting'}
+          className={`text-xs font-medium px-2.5 py-1 rounded-full border ${wsConnected
+            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+            : 'bg-amber-500/10 text-amber-300 border-amber-500/20'}`}
+        >
+          {wsConnected ? '● Live Sync' : '◌ Reconnecting'}
         </span>
       </div>
 

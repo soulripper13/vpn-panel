@@ -58,7 +58,7 @@ class Settings {
   }
 
   /**
-   * Return all settings as a plain object.
+   * Return public panel settings as a plain object; internal secrets are excluded.
    * @returns {Record<string, string>}
    */
   static getAll() {

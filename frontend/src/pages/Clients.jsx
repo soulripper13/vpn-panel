@@ -110,7 +110,7 @@ export default function Clients() {
         clashYaml: data.clashYaml,
         singboxJson: data.singboxJson,
         inbound: parentInbound,
-        client: data,
+        client: { ...data, ...(c.subUrl ? { subUrl: c.subUrl } : {}) },
       })
     } catch (err) {
       toast.error('Failed to load client credentials: ' + (err.response?.data?.message || err.message))
@@ -120,15 +120,29 @@ export default function Clients() {
   const handleRotateSubToken = async (c) => {
     if (!confirm(`Rotate subscription token for "${c.email}"? Any previously issued subscription links will immediately stop working.`)) return
     try {
-      const res = await api.post(`/inbounds/${c.inboundId}/clients/${c.id}/rotate-sub-token`)
-      const subUrl = res.data?.data?.subUrl
-      if (subUrl) {
-        await navigator.clipboard.writeText(subUrl)
-        toast.success('New subscription URL copied to clipboard!')
-      } else {
-        toast.success('Subscription token rotated successfully')
-      }
+      const revealRes = await api.post(`/inbounds/${c.inboundId}/clients/${c.id}/reveal`)
+      const rotateRes = await api.post(`/inbounds/${c.inboundId}/clients/${c.id}/rotate-sub-token`)
+      const subUrl = rotateRes.data?.data?.subUrl
+      const client = { ...revealRes.data.data, ...(subUrl ? { subUrl } : {}) }
+      const parentInbound = inbounds.find((inbound) => inbound.id === c.inboundId)
+
+      setActiveQR({
+        title: `${c.email} (${c.inboundRemark})`,
+        link: client.link,
+        clashYaml: client.clashYaml,
+        singboxJson: client.singboxJson,
+        inbound: parentInbound,
+        client,
+      })
       queryClient.invalidateQueries({ queryKey: ['inbounds'] })
+      if (subUrl) {
+        try {
+          await navigator.clipboard.writeText(subUrl)
+          toast.success('New subscription URL copied; its QR code is ready.')
+        } catch {
+          toast.success('New subscription QR is ready. Clipboard access was unavailable.')
+        }
+      }
     } catch {
       toast.error('Failed to rotate subscription token')
     }
@@ -194,6 +208,14 @@ export default function Clients() {
 
       if (res.data.success) {
         toast.success(`Client ${clientEmail} added to inbound!`)
+        setActiveQR({
+          title: clientEmail,
+          link: res.data.data.link,
+          clashYaml: res.data.data.clashYaml,
+          singboxJson: res.data.data.singboxJson,
+          inbound: targetInbound,
+          client: res.data.data,
+        })
         queryClient.invalidateQueries({ queryKey: ['inbounds'] })
         setShowAddModal(false)
         setClientEmail('')

@@ -74,6 +74,7 @@ bash <(curl -Ls https://raw.githubusercontent.com/soulripper13/vpn-panel/main/de
 - **URL:** `https://<SERVER_IP>:2096` (or `http://` for local test/dev setups)
 - **Initial Setup:** The installer generates secure random credentials or prompts you to configure them in `/opt/vpn-panel/.env` (`ADMIN_USERNAME` and `ADMIN_PASSWORD`).
 - **Security Notice:** Change default credentials immediately upon first login. When deploying to production, configure SSL/TLS certificates and place the management interface behind an authenticated proxy or VPN.
+- **Cross-origin frontends:** The panel is same-origin by default. If the UI is hosted separately, set `CORS_ALLOWED_ORIGINS` in `/opt/vpn-panel/.env` to a comma-separated list of exact origins, including scheme and port (for example, `https://panel.example.com`).
 
 ---
 

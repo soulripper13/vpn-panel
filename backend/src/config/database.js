@@ -145,7 +145,8 @@ try {
   }
   db.exec("CREATE INDEX IF NOT EXISTS idx_clients_sub_hash ON clients(sub_token_hash)");
 } catch (err) {
-  console.warn('[DB Migration] Notice on column migrations:', err.message);
+  console.error('[DB Migration] Client schema migration failed:', err.message);
+  throw err;
 }
 
 // Ensure all clients have high-entropy sub_token_hash

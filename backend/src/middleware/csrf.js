@@ -7,6 +7,23 @@
 
 const crypto = require('crypto');
 
+const allowedOrigins = new Set(String(process.env.CORS_ALLOWED_ORIGINS || '').split(',').map((entry) => {
+  try {
+    const url = new URL(entry.trim());
+    if (!['http:', 'https:'].includes(url.protocol) || url.pathname !== '/' || url.search || url.hash) {
+      return null;
+    }
+    return url.origin;
+  } catch {
+    return null;
+  }
+}).filter(Boolean));
+
+function isLoopbackAddress(address = '') {
+  const normalized = address.toLowerCase().replace(/^::ffff:/, '');
+  return normalized === '::1' || normalized === '127.0.0.1' || normalized.startsWith('127.');
+}
+
 /**
  * Generate and attach CSRF token to session if missing
  */
@@ -22,22 +39,19 @@ function ensureCsrfToken(req) {
  */
 function isValidOrigin(req) {
   const origin = req.headers.origin || req.headers.referer;
-  if (!origin) {
-    // If neither Origin nor Referer is provided on a browser request, verify CSRF token
-    return false;
-  }
+  if (!origin) return false;
 
   try {
     const originUrl = new URL(origin);
-    const hostHeader = (req.headers['x-forwarded-host'] || req.headers.host || '').split(':')[0].toLowerCase();
-    const originHost = originUrl.hostname.toLowerCase();
+    const fromTrustedProxy = isLoopbackAddress(req.socket?.remoteAddress || '');
+    const forwardedHost = fromTrustedProxy ? req.headers['x-forwarded-host'] : null;
+    const forwardedProto = fromTrustedProxy ? req.headers['x-forwarded-proto'] : null;
+    const requestHost = String(forwardedHost || req.headers.host || '').split(',')[0].trim();
+    const requestProto = String(forwardedProto || req.protocol || 'http').split(',')[0].trim().toLowerCase();
+    if (!requestHost || !['http', 'https'].includes(requestProto)) return false;
 
-    // Allow same hostname or loopback
-    if (originHost === hostHeader) return true;
-    if (['127.0.0.1', 'localhost', '::1'].includes(originHost) && ['127.0.0.1', 'localhost', '::1'].includes(hostHeader)) {
-      return true;
-    }
-    return false;
+    const expectedOrigin = new URL(`${requestProto}://${requestHost}`).origin;
+    return originUrl.origin === expectedOrigin || allowedOrigins.has(originUrl.origin);
   } catch {
     return false;
   }
@@ -69,7 +83,7 @@ function csrfProtection(req, res, next) {
     const headerToken = req.headers['x-csrf-token'] || req.headers['x-xsrf-token'] || req.body?._csrf;
 
     // 1. Strict Origin check if present
-    if (req.headers.origin && !isValidOrigin(req)) {
+    if ((req.headers.origin || req.headers.referer) && !isValidOrigin(req)) {
       return res.status(403).json({
         success: false,
         message: 'Cross-origin request blocked: Origin mismatch.',

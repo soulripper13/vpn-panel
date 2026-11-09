@@ -4,6 +4,12 @@ Review date: 2026-11-09
 
 Scope: backend, frontend, deployment scripts, systemd service, authentication, subscription delivery, engine control, update mechanisms, and VPN configuration generation.
 
+## Follow-up remediation status — 2026-11-10
+
+The current working tree includes fixes for the migration ordering, settings-secret exposure and save payload, subscription-token handoff/reissue UX, secret-bearing response caching, viewer redaction of inbound settings, credential-bearing QR access, exact CORS/CSRF/WebSocket origin checks, reverse-proxy Secure-cookie/HSTS handling, and updater checksum fail-closed behavior. The frontend now reports WebSocket state and lazy-loads route pages.
+
+Two higher-level risks remain intentionally open: the panel service still runs as root because engine control and in-place update flows currently require privileged operations; and updater hashes are not backed by publisher signatures, so release authenticity still depends on GitHub's API/HTTPS trust chain. The backend security-path tests were not run during this follow-up.
+
 ## Executive summary
 
 Do not expose the current management panel directly to the Internet without remediation. The highest-risk issues are:

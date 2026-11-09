@@ -124,6 +124,7 @@ async function downloadFile(url, destPath, minBytes = 1024) {
 
   await execFileAsync('curl', [
     '--fail', '--silent', '--show-error', '--location',
+    '--proto', '=https', '--proto-redir', '=https',
     '--connect-timeout', '15', '--max-time', '180',
     '--output', destPath, url,
   ]);
@@ -168,6 +169,7 @@ class BinaryUpdaterService {
           name: a.name,
           url: a.browser_download_url,
           size: a.size,
+          digest: a.digest,
         })),
       };
 
@@ -190,6 +192,7 @@ class BinaryUpdaterService {
             name: a.name,
             url: a.browser_download_url,
             size: a.size,
+            digest: a.digest,
           })),
         };
         cache.singbox = { data: result, timestamp: now };
@@ -224,6 +227,7 @@ class BinaryUpdaterService {
           name: a.name,
           url: a.browser_download_url,
           size: a.size,
+          digest: a.digest,
         })),
       };
 
@@ -245,6 +249,7 @@ class BinaryUpdaterService {
             name: a.name,
             url: a.browser_download_url,
             size: a.size,
+            digest: a.digest,
           })),
         };
         cache.xray = { data: result, timestamp: now };

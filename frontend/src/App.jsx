@@ -1,13 +1,23 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useAuthStore } from './store/authStore'
 import { getBasePath } from './utils/api'
 import Layout from './components/layout/Layout'
-import Login from './pages/Login'
-import Dashboard from './pages/Dashboard'
-import Inbounds from './pages/Inbounds'
-import Clients from './pages/Clients'
-import Settings from './pages/Settings'
-import Logs from './pages/Logs'
+
+const Login = lazy(() => import('./pages/Login'))
+const Dashboard = lazy(() => import('./pages/Dashboard'))
+const Inbounds = lazy(() => import('./pages/Inbounds'))
+const Clients = lazy(() => import('./pages/Clients'))
+const Settings = lazy(() => import('./pages/Settings'))
+const Logs = lazy(() => import('./pages/Logs'))
+
+function PageLoading() {
+  return (
+    <div className="min-h-[40vh] flex items-center justify-center text-sm text-slate-400" role="status">
+      Loading page…
+    </div>
+  )
+}
 
 function AuthGuard({ children }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
@@ -31,7 +41,7 @@ export default function App() {
           path="/login"
           element={
             <GuestGuard>
-              <Login />
+              <Suspense fallback={<PageLoading />}><Login /></Suspense>
             </GuestGuard>
           }
         />
@@ -44,11 +54,11 @@ export default function App() {
           }
         >
           <Route index element={<Navigate to="/dashboard" replace />} />
-          <Route path="dashboard" element={<Dashboard />} />
-          <Route path="inbounds" element={<Inbounds />} />
-          <Route path="clients" element={<Clients />} />
-          <Route path="settings" element={<Settings />} />
-          <Route path="logs" element={<Logs />} />
+          <Route path="dashboard" element={<Suspense fallback={<PageLoading />}><Dashboard /></Suspense>} />
+          <Route path="inbounds" element={<Suspense fallback={<PageLoading />}><Inbounds /></Suspense>} />
+          <Route path="clients" element={<Suspense fallback={<PageLoading />}><Clients /></Suspense>} />
+          <Route path="settings" element={<Suspense fallback={<PageLoading />}><Settings /></Suspense>} />
+          <Route path="logs" element={<Suspense fallback={<PageLoading />}><Logs /></Suspense>} />
         </Route>
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>

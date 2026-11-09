@@ -269,7 +269,20 @@ export default function Inbounds() {
       <AddInboundModal
         isOpen={isAddOpen}
         onClose={() => setIsAddOpen(false)}
-        onSuccess={refetch}
+        onSuccess={(created) => {
+          refetch()
+          const initialClient = created?.initialClient
+          if (initialClient) {
+            setQrModalData({
+              title: `New client — ${initialClient.email}`,
+              link: initialClient.link,
+              clashYaml: initialClient.clashYaml,
+              singboxJson: initialClient.singboxJson,
+              inbound: created,
+              client: initialClient,
+            })
+          }
+        }}
       />
 
       {/* Edit Inbound Modal */}

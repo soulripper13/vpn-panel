@@ -521,11 +521,13 @@ export default function Settings() {
             <input
               type="password"
               required
-              minLength={6}
+              minLength={10}
+              maxLength={128}
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
               className="w-full bg-[#14161f] border border-[#2d3148] rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
             />
+            <p className="mt-1 text-[10px] text-slate-500">Use 10–128 characters with at least one letter and one number.</p>
           </div>
 
           <div>
@@ -533,7 +535,8 @@ export default function Settings() {
             <input
               type="password"
               required
-              minLength={6}
+              minLength={10}
+              maxLength={128}
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               className="w-full bg-[#14161f] border border-[#2d3148] rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
