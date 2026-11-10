@@ -5,7 +5,7 @@ PANEL_DIR="${PANEL_DIR:-/opt/vpn-panel}"
 SERVICE_NAME="vpn-panel"
 PANEL_USER="vpn-panel"
 PANEL_GROUP="vpn-panel"
-VERSION="1.4.8"
+VERSION="1.4.9"
 RELEASE_ROOT="https://github.com/soulripper13/vpn-panel/releases/download/v${VERSION}"
 WORK_DIR="/tmp/vpn-panel-migration-${VERSION}-$$"
 BACKUP_DIR="/opt/vpn-panel-migration-backups/$(date +%Y%m%d_%H%M%S)"
@@ -126,10 +126,13 @@ done
 
 chown root:"${PANEL_GROUP}" "${PANEL_DIR}/.env"
 chmod 640 "${PANEL_DIR}/.env"
-rm -rf "${PANEL_DIR}/backend/node_modules"
-install -d -o "${PANEL_USER}" -g "${PANEL_GROUP}" -m 0750 "${PANEL_DIR}/backend/node_modules"
-install -d -o "${PANEL_USER}" -g "${PANEL_GROUP}" -m 0750 "${PANEL_DIR}/data/npm-home" "${PANEL_DIR}/data/npm-cache"
-runuser -u "${PANEL_USER}" -- env HOME="${PANEL_DIR}/data/npm-home" npm_config_cache="${PANEL_DIR}/data/npm-cache" npm ci --omit=dev --silent --prefix "${PANEL_DIR}/backend"
+if [[ ! -f "${PANEL_DIR}/backend/node_modules/better-sqlite3/package.json" ]]; then
+  install -d -o "${PANEL_USER}" -g "${PANEL_GROUP}" -m 0750 "${PANEL_DIR}/backend/node_modules"
+  install -d -o "${PANEL_USER}" -g "${PANEL_GROUP}" -m 0750 "${PANEL_DIR}/data/npm-home" "${PANEL_DIR}/data/npm-cache"
+  runuser -u "${PANEL_USER}" -- env HOME="${PANEL_DIR}/data/npm-home" npm_config_cache="${PANEL_DIR}/data/npm-cache" npm ci --omit=dev --silent --prefix "${PANEL_DIR}/backend"
+else
+  echo "Reusing existing native Node modules; dependency installation is deferred until after migration."
+fi
 if [[ -f /etc/vpn-panel/tls/fullchain.pem ]]; then CERT_FULLCHAIN=/etc/vpn-panel/tls/fullchain.pem; fi
 if [[ -f /etc/vpn-panel/tls/privkey.pem ]]; then CERT_PRIVKEY=/etc/vpn-panel/tls/privkey.pem; fi
 if command -v sqlite3 >/dev/null && [[ -f "${PANEL_DIR}/data/panel.db" ]]; then
