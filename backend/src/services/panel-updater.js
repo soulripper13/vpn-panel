@@ -254,7 +254,7 @@ class PanelUpdaterService {
    * Get current panel version
    */
   static getCurrentVersion() {
-    let version = '1.4.9';
+    let version = '1.4.10';
     let commit = '';
     let shortCommit = '';
     let buildDate = new Date().toISOString().split('T')[0];

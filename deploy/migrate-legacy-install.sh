@@ -5,7 +5,7 @@ PANEL_DIR="${PANEL_DIR:-/opt/vpn-panel}"
 SERVICE_NAME="vpn-panel"
 PANEL_USER="vpn-panel"
 PANEL_GROUP="vpn-panel"
-VERSION="1.4.9"
+VERSION="1.4.10"
 RELEASE_ROOT="https://github.com/soulripper13/vpn-panel/releases/download/v${VERSION}"
 WORK_DIR="/tmp/vpn-panel-migration-${VERSION}-$$"
 BACKUP_DIR="/opt/vpn-panel-migration-backups/$(date +%Y%m%d_%H%M%S)"
@@ -53,9 +53,24 @@ for suffix in tar.gz manifest.json manifest.sig; do
   curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
     "${RELEASE_ROOT}/vpn-panel-v${VERSION}.${suffix}" -o "${WORK_DIR}/vpn-panel-v${VERSION}.${suffix}"
 done
-openssl pkeyutl -verify -pubin -inkey "${WORK_DIR}/public-key.pem" \
-  -in "${WORK_DIR}/vpn-panel-v${VERSION}.manifest.json" -sigfile "${WORK_DIR}/vpn-panel-v${VERSION}.manifest.sig" >/dev/null \
-  || die "Release signature verification failed. No files were migrated."
+if ! openssl pkeyutl -verify -pubin -inkey "${WORK_DIR}/public-key.pem" \
+  -in "${WORK_DIR}/vpn-panel-v${VERSION}.manifest.json" -sigfile "${WORK_DIR}/vpn-panel-v${VERSION}.manifest.sig" >/dev/null 2>&1; then
+  command -v node >/dev/null || die "Release signature verification failed and Node.js is unavailable for the compatibility verifier. No files were migrated."
+  node - "${WORK_DIR}/public-key.pem" \
+    "${WORK_DIR}/vpn-panel-v${VERSION}.manifest.json" \
+    "${WORK_DIR}/vpn-panel-v${VERSION}.manifest.sig" <<'NODE' || die "Release signature verification failed. No files were migrated."
+const fs = require('fs');
+const crypto = require('crypto');
+const [publicKeyPath, manifestPath, signaturePath] = process.argv.slice(2);
+const valid = crypto.verify(
+  null,
+  fs.readFileSync(manifestPath),
+  fs.readFileSync(publicKeyPath),
+  fs.readFileSync(signaturePath),
+);
+if (!valid) process.exit(1);
+NODE
+fi
 expected=$(sed -n 's/.*"sha256":"\([a-f0-9]\{64\}\)".*/\1/p' "${WORK_DIR}/vpn-panel-v${VERSION}.manifest.json")
 actual=$(sha256sum "${WORK_DIR}/vpn-panel-v${VERSION}.tar.gz" | awk '{print $1}')
 [[ "${expected}" == "${actual}" ]] || die "Release digest verification failed. No files were migrated."
