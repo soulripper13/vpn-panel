@@ -1,6 +1,6 @@
 {
   "name": "vpn-panel-frontend",
-  "version": "1.4.14",
+  "version": "1.4.15",
   "type": "module",
   "scripts": {
     "dev": "vite",

@@ -21,7 +21,7 @@ NoNewPrivileges=false
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=/run/vpn-panel /opt/vpn-panel /etc/sing-box /etc/xray /usr/local/bin /usr/local/share/xray
+ReadWritePaths=/run/vpn-panel /opt/vpn-panel /etc/sing-box /etc/xray /usr/local/bin /usr/local/share/xray /usr/local/x-ui/bin
 
 [Install]
 WantedBy=multi-user.target

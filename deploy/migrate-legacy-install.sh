@@ -5,7 +5,7 @@ PANEL_DIR="${PANEL_DIR:-/opt/vpn-panel}"
 SERVICE_NAME="vpn-panel"
 PANEL_USER="vpn-panel"
 PANEL_GROUP="vpn-panel"
-VERSION="1.4.14"
+VERSION="1.4.15"
 RELEASE_ROOT="https://github.com/soulripper13/vpn-panel/releases/download/v${VERSION}"
 WORK_DIR="/tmp/vpn-panel-migration-${VERSION}-$$"
 BACKUP_DIR="/opt/vpn-panel-migration-backups/$(date +%Y%m%d_%H%M%S)"
@@ -213,7 +213,8 @@ if command -v sqlite3 >/dev/null && [[ -f "${PANEL_DIR}/data/panel.db" ]]; then
   [[ -n "${CERT_PRIVKEY:-}" ]] && sqlite3 "${PANEL_DIR}/data/panel.db" "INSERT OR REPLACE INTO settings(key,value) VALUES('cert_privkey','/etc/vpn-panel/tls/privkey.pem');"
 fi
 systemctl daemon-reload
-systemctl enable --now vpn-panel-privileged.service
+systemctl enable vpn-panel-privileged.service
+systemctl restart vpn-panel-privileged.service
 systemctl enable "${SERVICE_NAME}"
 systemctl start "${SERVICE_NAME}"
 healthy=0
