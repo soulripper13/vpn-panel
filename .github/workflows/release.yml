@@ -16,19 +16,22 @@ jobs:
         env:
           RELEASE_PRIVATE_KEY: ${{ secrets.VPN_PANEL_RELEASE_PRIVATE_KEY }}
         run: |
+          set -euo pipefail
+          test -n "$RELEASE_PRIVATE_KEY"
           version="${GITHUB_REF_NAME#v}"
           archive="vpn-panel-v${version}.tar.gz"
-          tar --exclude-vcs --exclude='backend/node_modules' --exclude='frontend/node_modules' -czf "$archive" --transform="s,^,vpn-panel-v${version}/," .
-          sha256=$(sha256sum "$archive" | awk '{print $1}')
-          printf '{"algorithm":"ed25519","archive":"%s","sha256":"%s","version":"%s"}\n' "$archive" "$sha256" "$version" > "vpn-panel-v${version}.manifest.json"
+          release_dir="$RUNNER_TEMP/vpn-panel-release"
+          mkdir -p "$release_dir"
+          tar --exclude-vcs --exclude='backend/node_modules' --exclude='frontend/node_modules' -czf "$release_dir/$archive" --transform="s,^,vpn-panel-v${version}/," .
+          sha256=$(sha256sum "$release_dir/$archive" | awk '{print $1}')
+          printf '{"algorithm":"ed25519","archive":"%s","sha256":"%s","version":"%s"}\n' "$archive" "$sha256" "$version" > "$release_dir/vpn-panel-v${version}.manifest.json"
+          umask 077
           printf '%s' "$RELEASE_PRIVATE_KEY" > /tmp/release-key.pem
-          openssl pkeyutl -sign -inkey /tmp/release-key.pem -in "vpn-panel-v${version}.manifest.json" -out "vpn-panel-v${version}.manifest.sig"
+          openssl pkeyutl -sign -inkey /tmp/release-key.pem -in "$release_dir/vpn-panel-v${version}.manifest.json" -out "$release_dir/vpn-panel-v${version}.manifest.sig"
           rm -f /tmp/release-key.pem
       - name: Publish release assets
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           files: |
-            vpn-panel-*.tar.gz
-            vpn-panel-*.manifest.json
-            vpn-panel-*.manifest.sig
+            ${{ runner.temp }}/vpn-panel-release/vpn-panel-*
