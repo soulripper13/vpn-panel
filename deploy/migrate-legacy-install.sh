@@ -5,7 +5,7 @@ PANEL_DIR="${PANEL_DIR:-/opt/vpn-panel}"
 SERVICE_NAME="vpn-panel"
 PANEL_USER="vpn-panel"
 PANEL_GROUP="vpn-panel"
-VERSION="1.4.12"
+VERSION="1.4.13"
 RELEASE_ROOT="https://github.com/soulripper13/vpn-panel/releases/download/v${VERSION}"
 WORK_DIR="/tmp/vpn-panel-migration-${VERSION}-$$"
 BACKUP_DIR="/opt/vpn-panel-migration-backups/$(date +%Y%m%d_%H%M%S)"
@@ -158,16 +158,41 @@ chown root:"${PANEL_GROUP}" "${PANEL_DIR}/.env"
 chmod 640 "${PANEL_DIR}/.env"
 
 if [[ -f "${PANEL_DIR}/.env" ]]; then
-  # Existing TLS files under /root are copied to a root-owned, panel-readable path.
+  # Legacy deployments may keep certificate paths in SQLite instead of .env.
   CERT_FULLCHAIN=$(sed -n 's/^CERT_FULLCHAIN=//p' "${PANEL_DIR}/.env" | tail -1)
   CERT_PRIVKEY=$(sed -n 's/^CERT_PRIVKEY=//p' "${PANEL_DIR}/.env" | tail -1)
   SINGBOX_CONFIG=$(sed -n 's/^SINGBOX_CONFIG=//p' "${PANEL_DIR}/.env" | tail -1)
   XRAY_CONFIG=$(sed -n 's/^XRAY_CONFIG=//p' "${PANEL_DIR}/.env" | tail -1)
-  if [[ -f "${CERT_FULLCHAIN}" || -f "${CERT_PRIVKEY}" ]]; then
-    install -d -o root -g "${PANEL_GROUP}" -m 0750 /etc/vpn-panel/tls
-    [[ -f "${CERT_FULLCHAIN}" ]] && install -o root -g "${PANEL_GROUP}" -m 0640 "${CERT_FULLCHAIN}" /etc/vpn-panel/tls/fullchain.pem
-    [[ -f "${CERT_PRIVKEY}" ]] && install -o root -g "${PANEL_GROUP}" -m 0640 "${CERT_PRIVKEY}" /etc/vpn-panel/tls/privkey.pem
-    sed -i 's#^CERT_FULLCHAIN=.*#CERT_FULLCHAIN=/etc/vpn-panel/tls/fullchain.pem#; s#^CERT_PRIVKEY=.*#CERT_PRIVKEY=/etc/vpn-panel/tls/privkey.pem#' "${PANEL_DIR}/.env"
+fi
+
+if command -v sqlite3 >/dev/null && [[ -f "${PANEL_DIR}/data/panel.db" ]]; then
+  [[ -n "${CERT_FULLCHAIN:-}" ]] || CERT_FULLCHAIN=$(sqlite3 -noheader "${PANEL_DIR}/data/panel.db" "SELECT value FROM settings WHERE key='cert_fullchain' LIMIT 1;" 2>/dev/null || true)
+  [[ -n "${CERT_PRIVKEY:-}" ]] || CERT_PRIVKEY=$(sqlite3 -noheader "${PANEL_DIR}/data/panel.db" "SELECT value FROM settings WHERE key='cert_privkey' LIMIT 1;" 2>/dev/null || true)
+fi
+CERT_FULLCHAIN=${CERT_FULLCHAIN//$'\r'/}
+CERT_FULLCHAIN=${CERT_FULLCHAIN//$'\n'/}
+CERT_PRIVKEY=${CERT_PRIVKEY//$'\r'/}
+CERT_PRIVKEY=${CERT_PRIVKEY//$'\n'/}
+
+# Keep TLS enabled and readable by the unprivileged service after migration.
+if [[ -n "${CERT_FULLCHAIN}" || -n "${CERT_PRIVKEY}" ]]; then
+  [[ -f "${CERT_FULLCHAIN}" && -f "${CERT_PRIVKEY}" ]] || die "Configured TLS certificate or private key is missing; refusing to migrate without HTTPS. The old installation will be restored."
+  install -d -o root -g "${PANEL_GROUP}" -m 0750 /etc/vpn-panel/tls
+  install -o root -g "${PANEL_GROUP}" -m 0640 "${CERT_FULLCHAIN}" /etc/vpn-panel/tls/fullchain.pem
+  install -o root -g "${PANEL_GROUP}" -m 0640 "${CERT_PRIVKEY}" /etc/vpn-panel/tls/privkey.pem
+  CERT_FULLCHAIN=/etc/vpn-panel/tls/fullchain.pem
+  CERT_PRIVKEY=/etc/vpn-panel/tls/privkey.pem
+  if [[ -f "${PANEL_DIR}/.env" ]]; then
+    if grep -q '^CERT_FULLCHAIN=' "${PANEL_DIR}/.env"; then
+      sed -i 's#^CERT_FULLCHAIN=.*#CERT_FULLCHAIN=/etc/vpn-panel/tls/fullchain.pem#' "${PANEL_DIR}/.env"
+    else
+      printf '\nCERT_FULLCHAIN=/etc/vpn-panel/tls/fullchain.pem\n' >> "${PANEL_DIR}/.env"
+    fi
+    if grep -q '^CERT_PRIVKEY=' "${PANEL_DIR}/.env"; then
+      sed -i 's#^CERT_PRIVKEY=.*#CERT_PRIVKEY=/etc/vpn-panel/tls/privkey.pem#' "${PANEL_DIR}/.env"
+    else
+      printf 'CERT_PRIVKEY=/etc/vpn-panel/tls/privkey.pem\n' >> "${PANEL_DIR}/.env"
+    fi
   fi
 fi
 
@@ -184,8 +209,8 @@ chmod 640 "${PANEL_DIR}/.env"
 if [[ -f /etc/vpn-panel/tls/fullchain.pem ]]; then CERT_FULLCHAIN=/etc/vpn-panel/tls/fullchain.pem; fi
 if [[ -f /etc/vpn-panel/tls/privkey.pem ]]; then CERT_PRIVKEY=/etc/vpn-panel/tls/privkey.pem; fi
 if command -v sqlite3 >/dev/null && [[ -f "${PANEL_DIR}/data/panel.db" ]]; then
-  [[ -n "${CERT_FULLCHAIN:-}" ]] && sqlite3 "${PANEL_DIR}/data/panel.db" "INSERT OR REPLACE INTO settings(key,value) VALUES('cert_fullchain','${CERT_FULLCHAIN}');"
-  [[ -n "${CERT_PRIVKEY:-}" ]] && sqlite3 "${PANEL_DIR}/data/panel.db" "INSERT OR REPLACE INTO settings(key,value) VALUES('cert_privkey','${CERT_PRIVKEY}');"
+  [[ -n "${CERT_FULLCHAIN:-}" ]] && sqlite3 "${PANEL_DIR}/data/panel.db" "INSERT OR REPLACE INTO settings(key,value) VALUES('cert_fullchain','/etc/vpn-panel/tls/fullchain.pem');"
+  [[ -n "${CERT_PRIVKEY:-}" ]] && sqlite3 "${PANEL_DIR}/data/panel.db" "INSERT OR REPLACE INTO settings(key,value) VALUES('cert_privkey','/etc/vpn-panel/tls/privkey.pem');"
 fi
 systemctl daemon-reload
 systemctl enable --now vpn-panel-privileged.service
