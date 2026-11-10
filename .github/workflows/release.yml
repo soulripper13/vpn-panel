@@ -37,3 +37,4 @@ jobs:
           generate_release_notes: true
           files: |
             ${{ runner.temp }}/vpn-panel-release/vpn-panel-*
+            ${{ runner.temp }}/vpn-panel-release/migrate-legacy-install.sh

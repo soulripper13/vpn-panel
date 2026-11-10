@@ -82,7 +82,7 @@ export default function Sidebar({ isOpen, onClose }) {
             </div>
           </div>
           <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700/60">
-            v1.4.1
+            v1.4.2
           </span>
         </div>
       </aside>
