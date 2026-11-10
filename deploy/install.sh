@@ -58,6 +58,10 @@ header "VPN Panel Installer — Preflight Checks"
 
 [[ $EUID -eq 0 ]] || die "This script must be run as root (sudo or su -)."
 
+if [[ -e "${PANEL_DIR}/.env" || -e "${DATA_DIR}/panel.db" || -f "${SERVICE_FILE}" ]]; then
+    die "An existing VPN Panel installation was found at ${PANEL_DIR}. For an older root-run install, use the signed migration: curl -fsSL https://github.com/soulripper13/vpn-panel/releases/download/v1.4.11/migrate-legacy-install.sh | sudo bash. For an install that already runs as vpn-panel, use the panel updater."
+fi
+
 if [[ -f /etc/os-release ]]; then
     # shellcheck source=/dev/null
     source /etc/os-release
@@ -458,9 +462,12 @@ header "Installing Backend Dependencies"
 cd "${BACKEND_DIR}"
 info "Installing dependencies from package-lock.json..."
 if [[ -f "${BACKEND_DIR}/package-lock.json" ]]; then
-    npm ci --omit=dev --silent 2>/dev/null || npm install --production --silent
+    if ! npm ci --omit=dev; then
+        warn "npm ci failed; retrying with npm install so the dependency error is visible."
+        npm install --omit=dev || die "Backend dependency installation failed. See the npm error above."
+    fi
 else
-    npm install --production --silent
+    npm install --omit=dev || die "Backend dependency installation failed. See the npm error above."
 fi
 success "Backend dependencies installed."
 cd -
