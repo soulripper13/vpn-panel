@@ -5,7 +5,7 @@ PANEL_DIR="${PANEL_DIR:-/opt/vpn-panel}"
 SERVICE_NAME="vpn-panel"
 PANEL_USER="vpn-panel"
 PANEL_GROUP="vpn-panel"
-VERSION="1.4.4"
+VERSION="1.4.5"
 RELEASE_ROOT="https://github.com/soulripper13/vpn-panel/releases/download/v${VERSION}"
 WORK_DIR="/tmp/vpn-panel-migration-${VERSION}-$$"
 BACKUP_DIR="/opt/vpn-panel-migration-backups/$(date +%Y%m%d_%H%M%S)"
@@ -131,8 +131,10 @@ install -d -o "${PANEL_USER}" -g "${PANEL_GROUP}" -m 0750 "${PANEL_DIR}/data/npm
 runuser -u "${PANEL_USER}" -- env HOME="${PANEL_DIR}/data/npm-home" npm_config_cache="${PANEL_DIR}/data/npm-cache" npm ci --omit=dev --silent --prefix "${PANEL_DIR}/backend"
 if [[ -f /etc/vpn-panel/tls/fullchain.pem ]]; then CERT_FULLCHAIN=/etc/vpn-panel/tls/fullchain.pem; fi
 if [[ -f /etc/vpn-panel/tls/privkey.pem ]]; then CERT_PRIVKEY=/etc/vpn-panel/tls/privkey.pem; fi
-runuser -u "${PANEL_USER}" -- env CERT_FULLCHAIN="${CERT_FULLCHAIN:-}" CERT_PRIVKEY="${CERT_PRIVKEY:-}" \
-  node -e "const Settings=require('${PANEL_DIR}/backend/src/models/Settings'); if(process.env.CERT_FULLCHAIN) Settings.set('cert_fullchain',process.env.CERT_FULLCHAIN); if(process.env.CERT_PRIVKEY) Settings.set('cert_privkey',process.env.CERT_PRIVKEY);"
+if command -v sqlite3 >/dev/null && [[ -f "${PANEL_DIR}/data/panel.db" ]]; then
+  [[ -n "${CERT_FULLCHAIN:-}" ]] && sqlite3 "${PANEL_DIR}/data/panel.db" "INSERT OR REPLACE INTO settings(key,value) VALUES('cert_fullchain','${CERT_FULLCHAIN}');"
+  [[ -n "${CERT_PRIVKEY:-}" ]] && sqlite3 "${PANEL_DIR}/data/panel.db" "INSERT OR REPLACE INTO settings(key,value) VALUES('cert_privkey','${CERT_PRIVKEY}');"
+fi
 systemctl daemon-reload
 systemctl enable --now vpn-panel-privileged.service
 systemctl enable "${SERVICE_NAME}"
