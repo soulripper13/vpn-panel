@@ -74,6 +74,8 @@ if ! id -u "${PANEL_USER}" >/dev/null 2>&1; then
   useradd --system --home-dir "${PANEL_DIR}" --no-create-home --shell /usr/sbin/nologin "${PANEL_USER}"
 fi
 PANEL_GROUP=$(id -gn "${PANEL_USER}")
+install -d -o root -g "${PANEL_GROUP}" -m 0750 /etc/sing-box /etc/xray /usr/local/share/xray
+if [[ -d /usr/local/x-ui ]]; then chmod 755 /usr/local/x-ui; fi
 install -d -o "${PANEL_USER}" -g "${PANEL_GROUP}" -m 0750 "${PANEL_DIR}/.privileged-staging"
 install -d -o "${PANEL_USER}" -g "${PANEL_GROUP}" -m 0770 "${PANEL_DIR}/.panel-update-backups"
 
