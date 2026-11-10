@@ -96,10 +96,9 @@ cp -f "${SOURCE}/deploy/panel-release-public-key.pem" "${PANEL_DIR}/deploy/panel
 
 chown -R root:"${PANEL_GROUP}" "${PANEL_DIR}"
 chmod -R 750 "${PANEL_DIR}"
-chown "${PANEL_USER}:${PANEL_GROUP}" "${PANEL_DIR}/data"
-chmod 770 "${PANEL_DIR}/data"
-chown "${PANEL_USER}:${PANEL_GROUP}" "${PANEL_DIR}/data/panel.db"
-chmod 660 "${PANEL_DIR}/data/panel.db"
+chown -R "${PANEL_USER}:${PANEL_GROUP}" "${PANEL_DIR}/data"
+find "${PANEL_DIR}/data" -type d -exec chmod 770 {} +
+find "${PANEL_DIR}/data" -type f -exec chmod 660 {} +
 chown root:"${PANEL_GROUP}" "${PANEL_DIR}/.env"
 chmod 640 "${PANEL_DIR}/.env"
 
