@@ -264,7 +264,7 @@ class PanelUpdaterService {
    * Get current panel version
    */
   static getCurrentVersion() {
-    let version = '1.4.16';
+    let version = '1.4.17';
     let commit = '';
     let shortCommit = '';
     let buildDate = new Date().toISOString().split('T')[0];
@@ -497,7 +497,7 @@ class PanelUpdaterService {
   static async _executePipeline(targetVersion = null) {
     const panelDir = PanelUpdaterService.getPanelDir();
     const updateId = String(Date.now());
-    const backupDir = path.join(panelDir, '.panel-update-backups', updateId);
+    let backupDir = path.join(panelDir, '.panel-update-backups', updateId);
     const tempDir = path.join(cfg.PRIVILEGED_STAGING_DIR, `panel-update-${updateId}`);
     const tarballPath = path.join(cfg.PRIVILEGED_STAGING_DIR, `vpn-panel-${updateId}.tar.gz`);
     const resolvedPanelDir = path.resolve(panelDir);
@@ -518,7 +518,13 @@ class PanelUpdaterService {
         ? getStagingIdentity()
         : { uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 };
 
-      fs.mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+      try {
+        fs.mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+      } catch {
+        // Fallback to data directory which is always guaranteed writable by the panel service
+        backupDir = path.join(path.dirname(cfg.DB_PATH), '.panel-update-backups', updateId);
+        fs.mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+      }
       fs.mkdirSync(tempDir, { recursive: true, mode: 0o700 });
       if (typeof process.getuid !== 'function' || process.getuid() === 0) fs.chownSync(tempDir, stagingIdentity.uid, stagingIdentity.gid);
       updateState.step = 'download';
@@ -679,6 +685,7 @@ class PanelUpdaterService {
           dbBackupPath,
           updateId,
           version: releaseInfo.latestVersion,
+          backupDir,
         }, 60000);
       }
       if (!promotion) {

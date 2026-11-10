@@ -218,7 +218,9 @@ async function promotePanel(payload) {
     throw new Error('Invalid panel promotion parameters');
   }
   regularFile(dbBackupPath);
-  const backupDir = path.join(PANEL_DIR, '.panel-update-backups', updateId);
+  const backupDir = payload.backupDir && inside(PANEL_DIR, path.resolve(payload.backupDir))
+    ? path.resolve(payload.backupDir)
+    : path.join(PANEL_DIR, '.panel-update-backups', updateId);
   fs.mkdirSync(backupDir, { recursive: true, mode: 0o700 });
   const verifiedDir = fs.mkdtempSync(path.join(STAGING_DIR, `verified-${updateId}-`));
   fs.chownSync(verifiedDir, 0, 0);

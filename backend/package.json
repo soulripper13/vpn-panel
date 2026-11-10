@@ -1,6 +1,6 @@
 {
   "name": "vpn-panel-backend",
-  "version": "1.4.16",
+  "version": "1.4.17",
   "description": "Unified VPN panel backend — manages both sing-box and xray",
   "main": "src/index.js",
   "scripts": {
