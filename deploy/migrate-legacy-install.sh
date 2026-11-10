@@ -5,7 +5,7 @@ PANEL_DIR="${PANEL_DIR:-/opt/vpn-panel}"
 SERVICE_NAME="vpn-panel"
 PANEL_USER="vpn-panel"
 PANEL_GROUP="vpn-panel"
-VERSION="1.4.11"
+VERSION="1.4.12"
 RELEASE_ROOT="https://github.com/soulripper13/vpn-panel/releases/download/v${VERSION}"
 WORK_DIR="/tmp/vpn-panel-migration-${VERSION}-$$"
 BACKUP_DIR="/opt/vpn-panel-migration-backups/$(date +%Y%m%d_%H%M%S)"
@@ -92,6 +92,12 @@ SOURCE="${WORK_DIR}/vpn-panel-v${VERSION}"
 
 command -v npm >/dev/null || die "npm is required to prepare the verified release. Install Node.js and npm, then retry; the running panel has not been changed."
 command -v runuser >/dev/null || die "runuser is required to prepare dependencies as the panel account."
+if ! command -v make >/dev/null || ! command -v g++ >/dev/null; then
+  command -v apt-get >/dev/null || die "A C/C++ build toolchain is required for native dependencies. Install build-essential, then retry; the running panel has not been changed."
+  echo "Installing native dependency build tools before stopping the current service..."
+  apt-get update
+  apt-get install -y --no-install-recommends build-essential python3
+fi
 if ! id -u "${PANEL_USER}" >/dev/null 2>&1; then
   useradd --system --home-dir "${PANEL_DIR}" --no-create-home --shell /usr/sbin/nologin "${PANEL_USER}"
 fi
