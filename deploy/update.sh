@@ -37,7 +37,7 @@ trap 'error "Update failed on line $LINENO."; exit 1' ERR
 [[ $EUID -eq 0 ]] || die "Must be run as root."
 [[ -d "${PANEL_DIR}" ]] || die "Panel not installed at ${PANEL_DIR}. Run install.sh first."
 if ! id -u vpn-panel >/dev/null 2>&1 || ! grep -q '^User=vpn-panel$' "/etc/systemd/system/${SERVICE_NAME}.service" || [[ ! -f "${PANEL_DIR}/deploy/vpn-panel-privileged.service" ]]; then
-    die "This is a legacy root-run installation. Run the signed legacy migration first: curl -fsSL https://github.com/soulripper13/vpn-panel/releases/download/v1.4.3/migrate-legacy-install.sh | sudo bash"
+    die "This is a legacy root-run installation. Run the signed legacy migration first: curl -fsSL https://github.com/soulripper13/vpn-panel/releases/download/v1.4.4/migrate-legacy-install.sh | sudo bash"
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

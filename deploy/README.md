@@ -9,7 +9,7 @@ The installer requires root because it creates the `vpn-panel` service account a
 On the VPS, open an SSH session as root (or an account with sudo), then run the signed migration script from the `v1.4.1` release:
 
 ```bash
-curl -fsSL https://github.com/soulripper13/vpn-panel/releases/download/v1.4.3/migrate-legacy-install.sh | sudo bash
+curl -fsSL https://github.com/soulripper13/vpn-panel/releases/download/v1.4.4/migrate-legacy-install.sh | sudo bash
 ```
 
 It verifies the signed release before stopping the existing service, keeps a complete backup under `/opt/vpn-panel-migration-backups/`, and restores the previous root-run service if migration fails. Keep your SSH session open and verify access to the panel and VPN services before closing it. Do not use `deploy/update.sh` for this first migration.
