@@ -5,7 +5,7 @@ PANEL_DIR="${PANEL_DIR:-/opt/vpn-panel}"
 SERVICE_NAME="vpn-panel"
 PANEL_USER="vpn-panel"
 PANEL_GROUP="vpn-panel"
-VERSION="1.4.5"
+VERSION="1.4.8"
 RELEASE_ROOT="https://github.com/soulripper13/vpn-panel/releases/download/v${VERSION}"
 WORK_DIR="/tmp/vpn-panel-migration-${VERSION}-$$"
 BACKUP_DIR="/opt/vpn-panel-migration-backups/$(date +%Y%m%d_%H%M%S)"
@@ -140,7 +140,16 @@ systemctl daemon-reload
 systemctl enable --now vpn-panel-privileged.service
 systemctl enable "${SERVICE_NAME}"
 systemctl start "${SERVICE_NAME}"
-sleep 3
-systemctl is-active --quiet "${SERVICE_NAME}" || die "New service did not become active."
+healthy=0
+for attempt in $(seq 1 30); do
+  if systemctl is-active --quiet "${SERVICE_NAME}" && curl -kfsS --max-time 2 "https://127.0.0.1:${PANEL_PORT:-2096}/healthz" >/dev/null; then
+    healthy=1
+    break
+  fi
+  sleep 1
+done
+[[ "${healthy}" -eq 1 ]] || die "New service did not pass its health check within 30 seconds."
+sleep 5
+systemctl is-active --quiet "${SERVICE_NAME}" || die "New service stopped after its health check."
 MIGRATION_COMPLETE=1
 echo "Migration complete. Backup retained at ${BACKUP_DIR}."
