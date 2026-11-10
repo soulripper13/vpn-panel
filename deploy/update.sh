@@ -61,7 +61,7 @@ install -d -o vpn-panel -g "${PANEL_GROUP}" -m 0770 "${PANEL_DIR}/.panel-update-
 chown -R vpn-panel:"${PANEL_GROUP}" "${DATA_DIR}" 2>/dev/null || true
 chmod 770 "${DATA_DIR}" 2>/dev/null || true
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 SOURCE_DIR="$(dirname "$SCRIPT_DIR")"
 
 header "VPN Panel Updater"
