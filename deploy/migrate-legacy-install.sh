@@ -5,7 +5,7 @@ PANEL_DIR="${PANEL_DIR:-/opt/vpn-panel}"
 SERVICE_NAME="vpn-panel"
 PANEL_USER="vpn-panel"
 PANEL_GROUP="vpn-panel"
-VERSION="1.4.2"
+VERSION="1.4.3"
 RELEASE_ROOT="https://github.com/soulripper13/vpn-panel/releases/download/v${VERSION}"
 WORK_DIR="/tmp/vpn-panel-migration-${VERSION}-$$"
 BACKUP_DIR="/opt/vpn-panel-migration-backups/$(date +%Y%m%d_%H%M%S)"
@@ -105,6 +105,8 @@ if [[ -f "${PANEL_DIR}/.env" ]]; then
   # Existing TLS files under /root are copied to a root-owned, panel-readable path.
   CERT_FULLCHAIN=$(sed -n 's/^CERT_FULLCHAIN=//p' "${PANEL_DIR}/.env" | tail -1)
   CERT_PRIVKEY=$(sed -n 's/^CERT_PRIVKEY=//p' "${PANEL_DIR}/.env" | tail -1)
+  SINGBOX_CONFIG=$(sed -n 's/^SINGBOX_CONFIG=//p' "${PANEL_DIR}/.env" | tail -1)
+  XRAY_CONFIG=$(sed -n 's/^XRAY_CONFIG=//p' "${PANEL_DIR}/.env" | tail -1)
   if [[ -f "${CERT_FULLCHAIN}" || -f "${CERT_PRIVKEY}" ]]; then
     install -d -o root -g "${PANEL_GROUP}" -m 0750 /etc/vpn-panel/tls
     [[ -f "${CERT_FULLCHAIN}" ]] && install -o root -g "${PANEL_GROUP}" -m 0640 "${CERT_FULLCHAIN}" /etc/vpn-panel/tls/fullchain.pem
@@ -112,6 +114,14 @@ if [[ -f "${PANEL_DIR}/.env" ]]; then
     sed -i 's#^CERT_FULLCHAIN=.*#CERT_FULLCHAIN=/etc/vpn-panel/tls/fullchain.pem#; s#^CERT_PRIVKEY=.*#CERT_PRIVKEY=/etc/vpn-panel/tls/privkey.pem#' "${PANEL_DIR}/.env"
   fi
 fi
+
+for config_path in "${SINGBOX_CONFIG:-/etc/sing-box/config.json}" "${XRAY_CONFIG:-/etc/xray/config.json}"; do
+  if [[ -f "${config_path}" ]]; then
+    chown root:"${PANEL_GROUP}" "${config_path}"
+    chmod 640 "${config_path}"
+    chmod 750 "$(dirname "${config_path}")"
+  fi
+done
 
 chown root:"${PANEL_GROUP}" "${PANEL_DIR}/.env"
 chmod 640 "${PANEL_DIR}/.env"
