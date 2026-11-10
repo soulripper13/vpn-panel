@@ -311,6 +311,8 @@ class SingboxService {
   static async getLogs(lines = 100) {
     const safeLines = Math.min(Math.max(parseInt(lines, 10) || 100, 1), 500);
     try {
+      const privilegedLogs = await privileged.call('read_service_logs', { engine: 'singbox', lines: safeLines });
+      if (privilegedLogs && typeof privilegedLogs.logs === 'string') return privilegedLogs.logs;
       const { stdout } = await execFileAsync('journalctl', [
         '-u', cfg.SINGBOX_SERVICE,
         '-n', String(safeLines),
@@ -319,7 +321,7 @@ class SingboxService {
       ]);
       return stdout;
     } catch (err) {
-      return `Unable to fetch sing-box logs: ${err.message}`;
+      return `Unable to fetch sing-box logs: ${err.message}. The panel account needs the restricted privileged log reader or journal access.`;
     }
   }
 }

@@ -103,6 +103,27 @@ async function serviceAction(payload) {
   return { success: true };
 }
 
+async function readServiceLogs(payload) {
+  const engineName = String(payload.engine || '');
+  const engine = ensureEngine(engineName);
+  const lines = Math.min(Math.max(Number.parseInt(payload.lines, 10) || 100, 1), 500);
+  const services = engineName === 'xray' && engine.service !== 'x-ui'
+    ? [engine.service, 'x-ui']
+    : [engine.service];
+  let lastError;
+  for (const service of services) {
+    try {
+      const { stdout } = await execFileAsync('/bin/journalctl', [
+        '-q', '-u', service, '-n', String(lines), '--no-pager', '--output=short-iso',
+      ], { timeout: 15000, maxBuffer: 2 * 1024 * 1024 });
+      return { logs: stdout };
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw new Error(`Unable to read ${engineName} service logs: ${lastError?.message || 'journalctl failed'}`);
+}
+
 async function writeEngineConfig(payload) {
   const engine = ensureEngine(payload.engine);
   if (!payload.config || typeof payload.config !== 'object' || Array.isArray(payload.config)) {
@@ -296,6 +317,7 @@ async function promotePanel(payload) {
 async function dispatch(operation, payload) {
   switch (operation) {
     case 'service_action': return serviceAction(payload);
+    case 'read_service_logs': return readServiceLogs(payload);
     case 'write_engine_config': return writeEngineConfig(payload);
     case 'install_binary': return installBinary(payload);
     case 'promote_panel': return promotePanel(payload);

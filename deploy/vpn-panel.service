@@ -27,7 +27,7 @@ ProtectKernelTunables=true
 ProtectControlGroups=true
 RestrictRealtime=true
 LockPersonality=true
-ReadWritePaths=/opt/vpn-panel/data /opt/vpn-panel/backend /opt/vpn-panel/public /etc/sing-box /etc/xray /usr/local/x-ui /var/log
+ReadWritePaths=/opt/vpn-panel/data /opt/vpn-panel/backend /opt/vpn-panel/public /opt/vpn-panel/.privileged-staging /etc/sing-box /etc/xray /usr/local/x-ui /var/log
 
 # Environment
 Environment=NODE_ENV=production

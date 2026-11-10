@@ -5,7 +5,7 @@ PANEL_DIR="${PANEL_DIR:-/opt/vpn-panel}"
 SERVICE_NAME="vpn-panel"
 PANEL_USER="vpn-panel"
 PANEL_GROUP="vpn-panel"
-VERSION="1.4.13"
+VERSION="1.4.14"
 RELEASE_ROOT="https://github.com/soulripper13/vpn-panel/releases/download/v${VERSION}"
 WORK_DIR="/tmp/vpn-panel-migration-${VERSION}-$$"
 BACKUP_DIR="/opt/vpn-panel-migration-backups/$(date +%Y%m%d_%H%M%S)"
@@ -178,8 +178,8 @@ CERT_PRIVKEY=${CERT_PRIVKEY//$'\n'/}
 if [[ -n "${CERT_FULLCHAIN}" || -n "${CERT_PRIVKEY}" ]]; then
   [[ -f "${CERT_FULLCHAIN}" && -f "${CERT_PRIVKEY}" ]] || die "Configured TLS certificate or private key is missing; refusing to migrate without HTTPS. The old installation will be restored."
   install -d -o root -g "${PANEL_GROUP}" -m 0750 /etc/vpn-panel/tls
-  install -o root -g "${PANEL_GROUP}" -m 0640 "${CERT_FULLCHAIN}" /etc/vpn-panel/tls/fullchain.pem
-  install -o root -g "${PANEL_GROUP}" -m 0640 "${CERT_PRIVKEY}" /etc/vpn-panel/tls/privkey.pem
+  [[ "${CERT_FULLCHAIN}" == /etc/vpn-panel/tls/fullchain.pem ]] || install -o root -g "${PANEL_GROUP}" -m 0640 "${CERT_FULLCHAIN}" /etc/vpn-panel/tls/fullchain.pem
+  [[ "${CERT_PRIVKEY}" == /etc/vpn-panel/tls/privkey.pem ]] || install -o root -g "${PANEL_GROUP}" -m 0640 "${CERT_PRIVKEY}" /etc/vpn-panel/tls/privkey.pem
   CERT_FULLCHAIN=/etc/vpn-panel/tls/fullchain.pem
   CERT_PRIVKEY=/etc/vpn-panel/tls/privkey.pem
   if [[ -f "${PANEL_DIR}/.env" ]]; then

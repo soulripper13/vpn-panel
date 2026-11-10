@@ -354,10 +354,14 @@ class XrayService {
   static async getLogs(lines = 100) {
     const safeLines = Math.min(Math.max(parseInt(lines, 10) || 100, 1), 500);
     try {
-      const { stdout } = await execAsync(`journalctl -u ${cfg.XRAY_SERVICE} -n ${safeLines} --no-pager 2>/dev/null || journalctl -u x-ui -n ${safeLines} --no-pager`);
+      const privilegedLogs = await privileged.call('read_service_logs', { engine: 'xray', lines: safeLines });
+      if (privilegedLogs && typeof privilegedLogs.logs === 'string') return privilegedLogs.logs;
+      const { stdout } = await execFileAsync('journalctl', [
+        '-u', cfg.XRAY_SERVICE, '-n', String(safeLines), '--no-pager', '--output=short-iso',
+      ]);
       return stdout;
     } catch (err) {
-      return `Unable to fetch Xray logs: ${err.message}`;
+      return `Unable to fetch Xray logs: ${err.message}. The panel account needs the restricted privileged log reader or journal access.`;
     }
   }
 

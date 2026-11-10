@@ -37,7 +37,7 @@ trap 'error "Update failed on line $LINENO."; exit 1' ERR
 [[ $EUID -eq 0 ]] || die "Must be run as root."
 [[ -d "${PANEL_DIR}" ]] || die "Panel not installed at ${PANEL_DIR}. Run install.sh first."
 if ! id -u vpn-panel >/dev/null 2>&1 || ! grep -q '^User=vpn-panel$' "/etc/systemd/system/${SERVICE_NAME}.service" || [[ ! -f "${PANEL_DIR}/deploy/vpn-panel-privileged.service" ]]; then
-    die "This is a legacy root-run installation. Run the signed legacy migration first: curl -fsSL https://github.com/soulripper13/vpn-panel/releases/download/v1.4.13/migrate-legacy-install.sh | sudo bash"
+    die "This is a legacy root-run installation. Run the signed legacy migration first: curl -fsSL https://github.com/soulripper13/vpn-panel/releases/download/v1.4.14/migrate-legacy-install.sh | sudo bash"
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -70,6 +70,7 @@ mkdir -p "${BACKUP_PATH}"
 
 [[ -f "${DATA_DIR}/panel.db" ]] && cp -a "${DATA_DIR}/panel.db" "${BACKUP_PATH}/panel.db" 2>/dev/null && info "Database backed up."
 [[ -f "${PANEL_DIR}/.env" ]] && cp -a "${PANEL_DIR}/.env" "${BACKUP_PATH}/.env" 2>/dev/null && info "Configuration backed up."
+[[ -f "/etc/systemd/system/${SERVICE_NAME}.service" ]] && cp -a "/etc/systemd/system/${SERVICE_NAME}.service" "${BACKUP_PATH}/vpn-panel.service" 2>/dev/null || true
 [[ -d "${BACKEND_DIR}" ]] && cp -r "${BACKEND_DIR}" "${BACKUP_PATH}/backend" 2>/dev/null || warn "Could not backup backend."
 [[ -d "${FRONTEND_DIR}" ]] && cp -r "${FRONTEND_DIR}" "${BACKUP_PATH}/public" 2>/dev/null || warn "Could not backup frontend."
 
@@ -148,7 +149,12 @@ if [[ -d "${SOURCE_DIR}/deploy" ]]; then
     if [[ -f "${PANEL_DIR}/deploy/vpn-panel-privileged.service" ]]; then
         cp -f "${PANEL_DIR}/deploy/vpn-panel-privileged.service" /etc/systemd/system/vpn-panel-privileged.service
         systemctl daemon-reload
-        systemctl enable --now vpn-panel-privileged.service
+        systemctl enable vpn-panel-privileged.service
+        systemctl restart vpn-panel-privileged.service
+    fi
+    if [[ -f "${SOURCE_DIR}/deploy/vpn-panel.service" ]]; then
+        cp -f "${SOURCE_DIR}/deploy/vpn-panel.service" "/etc/systemd/system/${SERVICE_NAME}.service"
+        success "Panel systemd sandbox rules updated."
     fi
 fi
 
@@ -172,6 +178,8 @@ else
     [[ -d "${BACKUP_PATH}/backend" ]] && cp -rf "${BACKUP_PATH}/backend/"* "${BACKEND_DIR}/" 2>/dev/null || true
     [[ -d "${BACKUP_PATH}/public" ]] && cp -rf "${BACKUP_PATH}/public/"* "${FRONTEND_DIR}/" 2>/dev/null || true
     [[ -f "${BACKUP_PATH}/panel.db" ]] && cp -a "${BACKUP_PATH}/panel.db" "${DATA_DIR}/panel.db" 2>/dev/null || true
+    [[ -f "${BACKUP_PATH}/vpn-panel.service" ]] && cp -f "${BACKUP_PATH}/vpn-panel.service" "/etc/systemd/system/${SERVICE_NAME}.service" 2>/dev/null || true
+    systemctl daemon-reload
     systemctl start "${SERVICE_NAME}" && warn "Rollback successful." || error "Rollback failed — manual intervention required."
     die "Update failed; rollback attempted."
 fi
