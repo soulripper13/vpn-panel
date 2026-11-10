@@ -158,6 +158,21 @@ function copyDir(source, target) {
   fs.cpSync(source, target, { recursive: true, force: true, errorOnExist: false });
 }
 
+function setPanelOwnership(root) {
+  const gid = Number(process.env.PRIVILEGED_GROUP_GID || process.getgid());
+  const stack = [root];
+  while (stack.length) {
+    const current = stack.pop();
+    const stat = fs.lstatSync(current);
+    if (stat.isSymbolicLink()) throw new Error(`Symbolic links are not allowed in promoted panel files: ${current}`);
+    fs.chownSync(current, 0, gid);
+    fs.chmodSync(current, stat.isDirectory() ? 0o750 : 0o640);
+    if (stat.isDirectory()) {
+      for (const name of fs.readdirSync(current)) stack.push(path.join(current, name));
+    }
+  }
+}
+
 function panelTargets(stagingRoot) {
   const targets = [
     ['backend/src', path.join(stagingRoot, 'backend/src')],
@@ -260,6 +275,8 @@ async function promotePanel(payload) {
     entry.state = 'installed';
     writeTransaction();
   }
+  setPanelOwnership(path.join(PANEL_DIR, 'backend'));
+  setPanelOwnership(path.join(PANEL_DIR, 'public'));
   transaction.promoted = true;
   writeTransaction();
 

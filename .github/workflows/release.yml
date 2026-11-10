@@ -29,6 +29,8 @@ jobs:
           printf '%s' "$RELEASE_PRIVATE_KEY" > /tmp/release-key.pem
           openssl pkeyutl -sign -inkey /tmp/release-key.pem -in "$release_dir/vpn-panel-v${version}.manifest.json" -out "$release_dir/vpn-panel-v${version}.manifest.sig"
           rm -f /tmp/release-key.pem
+          cp deploy/migrate-legacy-install.sh "$release_dir/migrate-legacy-install.sh"
+          chmod 755 "$release_dir/migrate-legacy-install.sh"
       - name: Publish release assets
         uses: softprops/action-gh-release@v2
         with:

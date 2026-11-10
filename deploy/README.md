@@ -4,6 +4,16 @@
 
 The installer requires root because it creates the `vpn-panel` service account and a narrowly scoped root helper. After installation, the web process runs as `vpn-panel`; it does not run as root. On hosts where you cannot install system services, run the panel as the account that owns the files and use `deploy/update.sh` manually. The one-click in-panel updater and core binary updater require the root helper.
 
+### Migrate an existing root-run installation
+
+On the VPS, open an SSH session as root (or an account with sudo), then run the signed migration script from the `v1.4.1` release:
+
+```bash
+curl -fsSL https://github.com/soulripper13/vpn-panel/releases/download/v1.4.1/migrate-legacy-install.sh | sudo bash
+```
+
+It verifies the signed release before stopping the existing service, keeps a complete backup under `/opt/vpn-panel-migration-backups/`, and restores the previous root-run service if migration fails. Keep your SSH session open and verify access to the panel and VPN services before closing it. Do not use `deploy/update.sh` for this first migration.
+
 | Requirement | Details |
 |---|---|
 | **Server OS** | Debian 12 / 13 (Trixie) or Ubuntu 22.04+ |
