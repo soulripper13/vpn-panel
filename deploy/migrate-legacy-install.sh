@@ -5,7 +5,7 @@ PANEL_DIR="${PANEL_DIR:-/opt/vpn-panel}"
 SERVICE_NAME="vpn-panel"
 PANEL_USER="vpn-panel"
 PANEL_GROUP="vpn-panel"
-VERSION="1.4.17"
+VERSION="1.4.18"
 RELEASE_ROOT="https://github.com/soulripper13/vpn-panel/releases/download/v${VERSION}"
 WORK_DIR="/tmp/vpn-panel-migration-${VERSION}-$$"
 BACKUP_DIR="/opt/vpn-panel-migration-backups/$(date +%Y%m%d_%H%M%S)"
@@ -107,6 +107,11 @@ fi
 if ! id -u "${PANEL_USER}" >/dev/null 2>&1; then
   useradd --system --home-dir "${PANEL_DIR}" --no-create-home --shell /usr/sbin/nologin "${PANEL_USER}"
 fi
+for grp in systemd-journal adm; do
+  if getent group "$grp" >/dev/null 2>&1; then
+    usermod -a -G "$grp" "${PANEL_USER}" 2>/dev/null || true
+  fi
+done
 PANEL_GROUP=$(id -gn "${PANEL_USER}")
 install -d -o "${PANEL_USER}" -g "${PANEL_GROUP}" -m 0750 \
   "${WORK_DIR}/npm-home" "${WORK_DIR}/npm-cache"

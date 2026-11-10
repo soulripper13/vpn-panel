@@ -327,7 +327,7 @@ async function promotePanel(payload) {
   ], { timeout: 20000 });
   await execFileAsync('/bin/systemd-run', [
     `--unit=vpn-panel-update-restart-${updateId}`, '--collect', '--on-active=2s',
-    '/bin/systemctl', 'restart', 'vpn-panel.service',
+    '/bin/systemctl', 'restart', 'vpn-panel-privileged.service', 'vpn-panel.service',
   ], { timeout: 20000 });
   return { success: true, backupDir, updateId };
 }

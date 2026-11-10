@@ -93,7 +93,7 @@ get_panel_version() {
     if [[ -f "${BACKEND_DIR}/package.json" ]]; then
         grep -o '"version": *"[^"]*"' "${BACKEND_DIR}/package.json" | head -n 1 | cut -d'"' -f4
     else
-        echo "1.4.17"
+        echo "1.4.18"
     fi
 }
 
@@ -172,6 +172,9 @@ stop_panel() {
 restart_panel() {
     echo -e "\n${CYAN}Restarting VPN Panel service...${NC}"
     systemctl daemon-reload
+    if systemctl is-active --quiet vpn-panel-privileged.service 2>/dev/null || [[ -f /etc/systemd/system/vpn-panel-privileged.service ]]; then
+        systemctl restart vpn-panel-privileged.service 2>/dev/null || true
+    fi
     systemctl restart "${SERVICE_NAME}"
     sleep 1
     if systemctl is-active --quiet "${SERVICE_NAME}"; then
@@ -481,7 +484,13 @@ main_menu() {
 case "${1:-}" in
     start)       check_root; systemctl start "${SERVICE_NAME}" ;;
     stop)        check_root; systemctl stop "${SERVICE_NAME}" ;;
-    restart)     check_root; systemctl restart "${SERVICE_NAME}" ;;
+    restart)
+        check_root
+        if systemctl is-active --quiet vpn-panel-privileged.service 2>/dev/null || [[ -f /etc/systemd/system/vpn-panel-privileged.service ]]; then
+            systemctl restart vpn-panel-privileged.service 2>/dev/null || true
+        fi
+        systemctl restart "${SERVICE_NAME}"
+        ;;
     status)      systemctl status "${SERVICE_NAME}" ;;
     log|logs)    journalctl -u "${SERVICE_NAME}" -f ;;
     update)      check_root; update_panel ;;

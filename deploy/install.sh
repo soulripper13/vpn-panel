@@ -491,6 +491,11 @@ header "Installing Systemd Service & CLI Tool"
 if ! id -u "${PANEL_USER}" >/dev/null 2>&1; then
     useradd --system --home-dir "${PANEL_DIR}" --no-create-home --shell /usr/sbin/nologin "${PANEL_USER}"
 fi
+for grp in systemd-journal adm; do
+    if getent group "$grp" >/dev/null 2>&1; then
+        usermod -a -G "$grp" "${PANEL_USER}" 2>/dev/null || true
+    fi
+done
 PANEL_GROUP=$(id -gn "${PANEL_USER}")
 
 mkdir -p "${PANEL_DIR}/deploy"
@@ -608,7 +613,8 @@ fi
 # ── Step 17: Start service ───────────────────────────────────────────────────
 header "Starting VPN Panel Service"
 
-systemctl enable --now vpn-panel-privileged.service
+systemctl enable vpn-panel-privileged.service 2>/dev/null || true
+systemctl restart vpn-panel-privileged.service 2>/dev/null || systemctl start vpn-panel-privileged.service 2>/dev/null || true
 systemctl enable "${SERVICE_NAME}"
 systemctl restart "${SERVICE_NAME}" 2>/dev/null || systemctl start "${SERVICE_NAME}"
 

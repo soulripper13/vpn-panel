@@ -50,6 +50,11 @@ if ! id -u vpn-panel >/dev/null 2>&1; then
     info "Setting up vpn-panel service account..."
     useradd --system --home-dir "${PANEL_DIR}" --no-create-home --shell /usr/sbin/nologin vpn-panel 2>/dev/null || true
 fi
+for grp in systemd-journal adm; do
+    if getent group "$grp" >/dev/null 2>&1; then
+        usermod -a -G "$grp" vpn-panel 2>/dev/null || true
+    fi
+done
 PANEL_GROUP=$(id -gn vpn-panel 2>/dev/null || echo "vpn-panel")
 install -d -o vpn-panel -g "${PANEL_GROUP}" -m 0750 "${PANEL_DIR}/.privileged-staging" 2>/dev/null || true
 install -d -o vpn-panel -g "${PANEL_GROUP}" -m 0770 "${PANEL_DIR}/.panel-update-backups" 2>/dev/null || true
@@ -165,7 +170,8 @@ if [[ -d "${SOURCE_DIR}/deploy" ]]; then
     if [[ -f "${PANEL_DIR}/deploy/vpn-panel-privileged.service" ]]; then
         cp -f "${PANEL_DIR}/deploy/vpn-panel-privileged.service" /etc/systemd/system/vpn-panel-privileged.service
         systemctl daemon-reload
-        systemctl enable --now vpn-panel-privileged.service 2>/dev/null || systemctl restart vpn-panel-privileged.service 2>/dev/null || true
+        systemctl enable vpn-panel-privileged.service 2>/dev/null || true
+        systemctl restart vpn-panel-privileged.service 2>/dev/null || true
     fi
     if [[ -f "${SOURCE_DIR}/deploy/vpn-panel.service" ]]; then
         cp -f "${SOURCE_DIR}/deploy/vpn-panel.service" "/etc/systemd/system/${SERVICE_NAME}.service"

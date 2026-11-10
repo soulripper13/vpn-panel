@@ -310,9 +310,15 @@ class SingboxService {
    */
   static async getLogs(lines = 100) {
     const safeLines = Math.min(Math.max(parseInt(lines, 10) || 100, 1), 500);
+    if (privileged.isConfigured()) {
+      try {
+        const privilegedLogs = await privileged.call('read_service_logs', { engine: 'singbox', lines: safeLines });
+        if (privilegedLogs && typeof privilegedLogs.logs === 'string') return privilegedLogs.logs;
+      } catch (_) {
+        // Fall back to direct journalctl if privileged helper fails or is reloading
+      }
+    }
     try {
-      const privilegedLogs = await privileged.call('read_service_logs', { engine: 'singbox', lines: safeLines });
-      if (privilegedLogs && typeof privilegedLogs.logs === 'string') return privilegedLogs.logs;
       const { stdout } = await execFileAsync('journalctl', [
         '-u', cfg.SINGBOX_SERVICE,
         '-n', String(safeLines),
