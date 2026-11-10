@@ -116,7 +116,8 @@ The panel supports one-click updates directly from the web interface or via CLI:
 
 ### 1. In-Panel One-Click Updates (Recommended)
 Navigate to **Settings** → **Panel & Core Engine Updates**:
-- **VPN Panel:** Detects latest GitHub commits and releases, performs atomic database backup, updates assets, and gracefully restarts the service with live log streaming.
+- **VPN Panel:** Installs only published versioned releases. It stages dependencies and backend tests before promotion, keeps the previous files and a consistent SQLite backup, then confirms the expected version is healthy after restart. A separate systemd watchdog restores the previous installation if that check fails.
+- **Release trust:** Panel bundles are accepted only when the pinned Ed25519 public key verifies the signed SHA-256 manifest and the archive matches it. Configure the corresponding private key as the GitHub Actions secret `VPN_PANEL_RELEASE_PRIVATE_KEY`; keep that key outside the repository. Root installs use a dedicated privileged helper for promotion and rollback. Non-root/manual installs should use `deploy/update.sh` as the installation owner.
 - **sing-box & Xray-core:** Directly updates core binaries in-place from official upstream releases with automated syntax verification and restart.
 
 ### 2. Command-Line Update

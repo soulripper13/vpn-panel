@@ -142,6 +142,11 @@ if [[ -d "${SOURCE_DIR}/deploy" ]]; then
     ln -sf "${PANEL_DIR}/deploy/vpn-panel.sh" /usr/local/bin/panel
     chmod +x /usr/local/bin/vpn-panel /usr/bin/vpn-panel /usr/local/bin/panel 2>/dev/null || true
     info "CLI tool 'vpn-panel' updated."
+    if [[ -f "${PANEL_DIR}/deploy/vpn-panel-privileged.service" ]]; then
+        cp -f "${PANEL_DIR}/deploy/vpn-panel-privileged.service" /etc/systemd/system/vpn-panel-privileged.service
+        systemctl daemon-reload
+        systemctl enable --now vpn-panel-privileged.service
+    fi
 fi
 
 # Clean up temp downloads if any

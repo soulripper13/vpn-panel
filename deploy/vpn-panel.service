@@ -8,6 +8,9 @@ Wants=network.target
 Type=simple
 WorkingDirectory=/opt/vpn-panel/backend
 ExecStart=/usr/bin/node src/index.js
+User=vpn-panel
+Group=vpn-panel
+SupplementaryGroups=vpn-panel
 Restart=always
 RestartSec=5s
 StandardOutput=journal
@@ -24,10 +27,11 @@ ProtectKernelTunables=true
 ProtectControlGroups=true
 RestrictRealtime=true
 LockPersonality=true
-ReadWritePaths=/opt/vpn-panel /etc/sing-box /etc/xray /usr/local/x-ui /var/log
+ReadWritePaths=/opt/vpn-panel/data /opt/vpn-panel/backend /opt/vpn-panel/public /etc/sing-box /etc/xray /usr/local/x-ui /var/log
 
 # Environment
 Environment=NODE_ENV=production
+Environment=REQUIRE_PRIVILEGED_HELPER=1
 EnvironmentFile=-/opt/vpn-panel/.env
 
 # Resource limits

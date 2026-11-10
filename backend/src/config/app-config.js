@@ -26,6 +26,9 @@ const PANEL_PORT    = parseInt(process.env.PANEL_PORT || '2096', 10);
 const WEB_BASE_PATH = process.env.WEB_BASE_PATH || '';
 const crypto        = require('crypto');
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+const PRIVILEGED_SOCKET = process.env.PRIVILEGED_SOCKET || '/run/vpn-panel/privileged.sock';
+const PRIVILEGED_STAGING_DIR = process.env.PRIVILEGED_STAGING_DIR || '/opt/vpn-panel/.privileged-staging';
+const PANEL_DIR = process.env.PANEL_DIR || '/opt/vpn-panel';
 
 // ─── Sing-box ─────────────────────────────────────────────────────────────────
 function detectSingboxBin() {
@@ -115,6 +118,9 @@ module.exports = {
   PANEL_PORT,
   WEB_BASE_PATH,
   SESSION_SECRET,
+  PRIVILEGED_SOCKET,
+  PRIVILEGED_STAGING_DIR,
+  PANEL_DIR,
   SERVER_IP,
 
   // Sing-box

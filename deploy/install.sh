@@ -22,6 +22,8 @@ DATA_DIR="${PANEL_DIR}/data"
 ENV_FILE="${PANEL_DIR}/.env"
 SERVICE_NAME="vpn-panel"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+PANEL_USER="vpn-panel"
+PANEL_GROUP="vpn-panel"
 NODE_VERSION="20"
 
 SINGBOX_BIN="/usr/bin/sing-box"
@@ -466,11 +468,17 @@ cd -
 # ── Step 11: Install systemd service & CLI tool ──────────────────────────────
 header "Installing Systemd Service & CLI Tool"
 
+if ! id -u "${PANEL_USER}" >/dev/null 2>&1; then
+    useradd --system --home-dir "${PANEL_DIR}" --no-create-home --shell /usr/sbin/nologin "${PANEL_USER}"
+fi
+PANEL_GROUP=$(id -gn "${PANEL_USER}")
+
 mkdir -p "${PANEL_DIR}/deploy"
 cp -rf "${SCRIPT_DIR}/"* "${PANEL_DIR}/deploy/" 2>/dev/null || true
 chmod +x "${PANEL_DIR}/deploy/"*.sh 2>/dev/null || true
 
 cp "${PANEL_DIR}/deploy/vpn-panel.service" "${SERVICE_FILE}" 2>/dev/null || cp "${SCRIPT_DIR}/vpn-panel.service" "${SERVICE_FILE}"
+cp "${PANEL_DIR}/deploy/vpn-panel-privileged.service" /etc/systemd/system/vpn-panel-privileged.service
 systemctl daemon-reload
 success "Service file installed at ${SERVICE_FILE}"
 
@@ -512,6 +520,20 @@ EOF
 chmod 600 "${ENV_FILE}"
 success ".env written to ${ENV_FILE}"
 
+# Keep TLS private keys out of /root while allowing only the panel account to read them.
+if [[ -f "${CERT_FULLCHAIN}" || -f "${CERT_PRIVKEY}" ]]; then
+    TLS_DIR="/etc/vpn-panel/tls"
+    install -d -o root -g "${PANEL_GROUP}" -m 0750 "${TLS_DIR}"
+    if [[ -f "${CERT_FULLCHAIN}" ]]; then install -o root -g "${PANEL_GROUP}" -m 0640 "${CERT_FULLCHAIN}" "${TLS_DIR}/fullchain.pem"; CERT_FULLCHAIN="${TLS_DIR}/fullchain.pem"; fi
+    if [[ -f "${CERT_PRIVKEY}" ]]; then install -o root -g "${PANEL_GROUP}" -m 0640 "${CERT_PRIVKEY}" "${TLS_DIR}/privkey.pem"; CERT_PRIVKEY="${TLS_DIR}/privkey.pem"; fi
+fi
+sed -i "s#^CERT_FULLCHAIN=.*#CERT_FULLCHAIN=${CERT_FULLCHAIN}#; s#^CERT_PRIVKEY=.*#CERT_PRIVKEY=${CERT_PRIVKEY}#" "${ENV_FILE}"
+chown root:"${PANEL_GROUP}" "${ENV_FILE}"
+chmod 640 "${ENV_FILE}"
+chown root:"${PANEL_GROUP}" "${SINGBOX_CONFIG}" "${XRAY_CONFIG}" 2>/dev/null || true
+chmod 640 "${SINGBOX_CONFIG}" "${XRAY_CONFIG}" 2>/dev/null || true
+chmod 750 "$(dirname "${SINGBOX_CONFIG}")" "$(dirname "${XRAY_CONFIG}")" 2>/dev/null || true
+
 # ── Step 14: Initialize SQLite database ─────────────────────────────────────
 header "Initializing Database"
 
@@ -533,11 +555,16 @@ info "Credentials configured → user: ${ADMIN_USERNAME} / pass: ${ADMIN_PASSWOR
 # ── Step 15: Set ownership & permissions ────────────────────────────────────
 header "Setting Permissions"
 
-chown -R root:root "${PANEL_DIR}"
-chmod -R 755 "${PANEL_DIR}"
-chmod 700 "${PANEL_DIR}/data" 2>/dev/null || true
-chmod 600 "${PANEL_DIR}/data/panel.db" 2>/dev/null || true
-chmod 600 "${ENV_FILE}" 2>/dev/null || true
+chown -R root:"${PANEL_GROUP}" "${PANEL_DIR}"
+chmod -R 750 "${PANEL_DIR}"
+install -d -o "${PANEL_USER}" -g "${PANEL_GROUP}" -m 0750 "${PANEL_DIR}/.privileged-staging"
+install -d -o "${PANEL_USER}" -g "${PANEL_GROUP}" -m 0770 "${PANEL_DIR}/.panel-update-backups"
+chown "${PANEL_USER}:${PANEL_GROUP}" "${PANEL_DIR}/data"
+chmod 770 "${PANEL_DIR}/data"
+chown "${PANEL_USER}:${PANEL_GROUP}" "${PANEL_DIR}/data/panel.db"
+chmod 660 "${PANEL_DIR}/data/panel.db"
+chown root:"${PANEL_GROUP}" "${ENV_FILE}"
+chmod 640 "${ENV_FILE}"
 chmod 755 "${FRONTEND_DIR}"
 chmod +x "${PANEL_DIR}/deploy/"*.sh 2>/dev/null || true
 chmod +x /usr/local/bin/vpn-panel /usr/local/bin/panel /usr/bin/vpn-panel 2>/dev/null || true
@@ -561,6 +588,7 @@ fi
 # ── Step 17: Start service ───────────────────────────────────────────────────
 header "Starting VPN Panel Service"
 
+systemctl enable --now vpn-panel-privileged.service
 systemctl enable "${SERVICE_NAME}"
 systemctl restart "${SERVICE_NAME}" 2>/dev/null || systemctl start "${SERVICE_NAME}"
 

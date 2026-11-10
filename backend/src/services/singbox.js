@@ -15,6 +15,7 @@ const Inbound = require('../models/Inbound');
 const Client = require('../models/Client');
 const Settings = require('../models/Settings');
 const { generateSingboxInbound } = require('../utils/config-generator');
+const privileged = require('./privileged-client');
 
 const execFileAsync = util.promisify(execFile);
 
@@ -129,6 +130,8 @@ class SingboxService {
    * Start sing-box service
    */
   static async start() {
+    const delegated = await privileged.callRequired('service_action', { engine: 'singbox', action: 'start' });
+    if (delegated) return { success: true, message: 'sing-box service started' };
     try {
       await execFileAsync('systemctl', ['start', cfg.SINGBOX_SERVICE]);
       return { success: true, message: 'sing-box service started' };
@@ -141,6 +144,8 @@ class SingboxService {
    * Stop sing-box service
    */
   static async stop() {
+    const delegated = await privileged.callRequired('service_action', { engine: 'singbox', action: 'stop' });
+    if (delegated) return { success: true, message: 'sing-box service stopped' };
     try {
       await execFileAsync('systemctl', ['stop', cfg.SINGBOX_SERVICE]);
       return { success: true, message: 'sing-box service stopped' };
@@ -153,6 +158,8 @@ class SingboxService {
    * Restart sing-box service
    */
   static async restart() {
+    const delegated = await privileged.callRequired('service_action', { engine: 'singbox', action: 'restart' });
+    if (delegated) return { success: true, message: 'sing-box service restarted' };
     try {
       await execFileAsync('systemctl', ['restart', cfg.SINGBOX_SERVICE]);
       return { success: true, message: 'sing-box service restarted' };
@@ -180,6 +187,8 @@ class SingboxService {
    * Validate and write config to disk with restricted permissions (0600)
    */
   static async writeConfig(configObject) {
+    const delegated = await privileged.callRequired('write_engine_config', { engine: 'singbox', config: configObject });
+    if (delegated) return true;
     const jsonStr = JSON.stringify(configObject, null, 2);
     const dir = path.dirname(cfg.SINGBOX_CONFIG);
     if (!fs.existsSync(dir)) {

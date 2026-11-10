@@ -15,6 +15,7 @@ const Inbound = require('../models/Inbound');
 const Client = require('../models/Client');
 const Settings = require('../models/Settings');
 const { generateXrayInbound } = require('../utils/config-generator');
+const privileged = require('./privileged-client');
 
 const execAsync = util.promisify(exec);
 const execFileAsync = util.promisify(execFile);
@@ -117,6 +118,8 @@ class XrayService {
    * Start xray service / process
    */
   static async start() {
+    const delegated = await privileged.callRequired('service_action', { engine: 'xray', action: 'start' });
+    if (delegated) return { success: true, message: 'Xray service started' };
     const status = await XrayService.getStatus();
     if (status.running) {
       return { success: true, message: 'Xray is already running' };
@@ -143,6 +146,8 @@ class XrayService {
    * Stop xray service / process
    */
   static async stop() {
+    const delegated = await privileged.callRequired('service_action', { engine: 'xray', action: 'stop' });
+    if (delegated) return { success: true, message: 'Xray stopped' };
     try {
       await execAsync(`systemctl stop ${cfg.XRAY_SERVICE} 2>/dev/null || pkill -f "${cfg.XRAY_PROCESS_NAME}"`);
       return { success: true, message: 'Xray stopped' };
@@ -156,6 +161,8 @@ class XrayService {
    * Restart xray
    */
   static async restart() {
+    const delegated = await privileged.callRequired('service_action', { engine: 'xray', action: 'restart' });
+    if (delegated) return { success: true, message: 'Xray service restarted' };
     try {
       await execAsync(`systemctl restart ${cfg.XRAY_SERVICE}`);
       return { success: true, message: 'Xray service restarted' };
@@ -183,6 +190,8 @@ class XrayService {
    * Validate and write config to disk with restricted permissions (0600)
    */
   static async writeConfig(configObject) {
+    const delegated = await privileged.callRequired('write_engine_config', { engine: 'xray', config: configObject });
+    if (delegated) return true;
     const jsonStr = JSON.stringify(configObject, null, 2);
     const dir = path.dirname(cfg.XRAY_CONFIG);
     if (!fs.existsSync(dir)) {

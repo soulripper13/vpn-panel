@@ -15,8 +15,6 @@ import toast from 'react-hot-toast'
 import Spinner from '../ui/Spinner'
 
 export default function PanelUpdateModal({ isOpen, onClose, panelInfo, onFinished }) {
-  if (!isOpen) return null
-
   const [status, setStatus] = useState('idle') // idle | running | restarting | completed | failed
   const [step, setStep] = useState('init')
   const [progress, setProgress] = useState(0)
@@ -27,6 +25,7 @@ export default function PanelUpdateModal({ isOpen, onClose, panelInfo, onFinishe
   const logContainerRef = useRef(null)
   const pollTimerRef = useRef(null)
   const reconnectTimerRef = useRef(null)
+  const updateStartedRef = useRef(false)
 
   // Auto-scroll logs terminal
   useEffect(() => {
@@ -44,10 +43,24 @@ export default function PanelUpdateModal({ isOpen, onClose, panelInfo, onFinishe
       setError(null)
       setReconnectAttempts(0)
 
+      const existing = await api.get('/engine/panel/update/status', { timeout: 3000 }).catch(() => null)
+      const inProgress = existing?.data?.data
+      if (inProgress && ['running', 'restarting'].includes(inProgress.status)) {
+        updateStartedRef.current = true
+        setStatus(inProgress.status)
+        setStep(inProgress.step || 'init')
+        setProgress(inProgress.progress || 5)
+        setLogs(Array.isArray(inProgress.logs) ? inProgress.logs : [])
+        if (inProgress.status === 'restarting') startReconnectionPolling()
+        else pollStatus()
+        return
+      }
+
       const res = await api.post('/engine/panel/update')
       if (!res.data.success) {
         throw new Error(res.data.message || 'Failed to start update')
       }
+      updateStartedRef.current = true
 
       // Start polling status
       pollStatus()
@@ -89,7 +102,7 @@ export default function PanelUpdateModal({ isOpen, onClose, panelInfo, onFinishe
         }
       } catch (err) {
         // If request fails during running/restarting, the service might be restarting
-        if (status === 'running' || status === 'restarting') {
+        if (updateStartedRef.current) {
           clearInterval(pollTimerRef.current)
           setStatus('restarting')
           startReconnectionPolling()
@@ -116,37 +129,45 @@ export default function PanelUpdateModal({ isOpen, onClose, panelInfo, onFinishe
       try {
         const res = await api.get('/settings', { timeout: 3000 })
         if (res.status === 200) {
-          clearInterval(reconnectTimerRef.current)
-          setStatus('completed')
-          setProgress(100)
-          setLogs((prev) => [
-            ...prev,
-            `[${new Date().toLocaleTimeString()}] Panel is back online! Refreshing interface...`,
-          ])
-          toast.success('Panel successfully updated to the latest version!')
-          setTimeout(() => {
-            window.location.reload()
-          }, 2000)
+          const updateRes = await api.get('/engine/panel/update/status', { timeout: 3000 })
+          const update = updateRes.data?.data
+          if (update?.status === 'failed') {
+            clearInterval(reconnectTimerRef.current)
+            setStatus('failed')
+            setError(update.error || 'The update failed. The previous version was restored.')
+            if (Array.isArray(update.logs)) setLogs(update.logs)
+          } else if (update?.status === 'completed') {
+            clearInterval(reconnectTimerRef.current)
+            setStatus('completed')
+            setProgress(100)
+            if (Array.isArray(update.logs)) setLogs(update.logs)
+            toast.success('Panel passed its update health check!')
+            setTimeout(() => window.location.reload(), 2000)
+          }
         }
       } catch {
         // Still restarting
       }
 
-      if (attempts > 60) {
+      if (attempts > 150) {
         clearInterval(reconnectTimerRef.current)
         setStatus('failed')
-        setError('Reconnection timed out. Please check "journalctl -u vpn-panel -f" on your server.')
+        setError('The panel did not confirm the update health check in time. Check the server service status before retrying.')
       }
     }, 1500)
   }
 
   useEffect(() => {
+    if (!isOpen) return undefined
+    updateStartedRef.current = false
     startUpdate()
     return () => {
       clearInterval(pollTimerRef.current)
       clearInterval(reconnectTimerRef.current)
     }
-  }, [])
+  }, [isOpen])
+
+  if (!isOpen) return null
 
   const canClose = status === 'completed' || status === 'failed'
 
@@ -158,8 +179,10 @@ export default function PanelUpdateModal({ isOpen, onClose, panelInfo, onFinishe
         return 'Downloading latest code package from GitHub...'
       case 'extract':
         return 'Extracting update package...'
+      case 'preflight':
+        return 'Checking staged dependencies and backend tests...'
       case 'deploy_files':
-        return 'Deploying updated backend & frontend assets...'
+        return 'Promoting the tested release...'
       case 'dependencies':
         return 'Updating production npm packages...'
       case 'restarting':

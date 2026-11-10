@@ -6,9 +6,9 @@ Scope: backend, frontend, deployment scripts, systemd service, authentication, s
 
 ## Follow-up remediation status — 2026-11-10
 
-The current working tree includes fixes for the migration ordering, settings-secret exposure and save payload, subscription-token handoff/reissue UX, secret-bearing response caching, viewer redaction of inbound settings, credential-bearing QR access, exact CORS/CSRF/WebSocket origin checks, reverse-proxy Secure-cookie/HSTS handling, and updater checksum fail-closed behavior. The frontend now reports WebSocket state and lazy-loads route pages.
+The current working tree includes fixes for the migration ordering, settings-secret exposure and save payload, subscription-token handoff/reissue UX, secret-bearing response caching, viewer redaction of inbound settings, credential-bearing QR access, exact CORS/CSRF/WebSocket origin checks, reverse-proxy Secure-cookie/HSTS handling, and updater checksum fail-closed behavior. The panel updater now stages dependencies and tests, keeps a consistent database and file rollback snapshot, and waits for an independent watchdog to confirm the expected version after restart. The frontend reports WebSocket state, lazy-loads route pages, and waits for update health confirmation before reporting success. The executive summary and findings below describe the initial review; use this follow-up status for changes made afterward.
 
-Two higher-level risks remain intentionally open: the panel service still runs as root because engine control and in-place update flows currently require privileged operations; and updater hashes are not backed by publisher signatures, so release authenticity still depends on GitHub's API/HTTPS trust chain. The backend security-path tests were not run during this follow-up.
+The two higher-level risks are addressed in the current working tree. Root installs now run the HTTP panel as `vpn-panel`; a separate root-owned helper exposes only fixed engine actions/config writes, signed binary installs, and signed panel promotion. Panel releases require an Ed25519 signature over a SHA-256 manifest, with the public key pinned in `deploy/panel-release-public-key.pem`. The release workflow expects the matching private key in the `VPN_PANEL_RELEASE_PRIVATE_KEY` GitHub secret. Non-root/manual installations do not claim these capabilities and should use `deploy/update.sh` with the account that owns the installation. The backend test suite passed (13/13), and the frontend production build passed during this follow-up. A live systemd migration test remains required on a staging VPS.
 
 ## Executive summary
 
@@ -18,7 +18,7 @@ Do not expose the current management panel directly to the Internet without reme
 2. The WebSocket endpoint has no authentication and `/ws` bypasses the secret base-path check, exposing live system and engine telemetry.
 3. The panel defaults to plaintext HTTP and silently falls back to HTTP when TLS setup fails.
 4. Management and update endpoints are session-authenticated but not consistently admin-only and have no CSRF protection.
-5. The panel service runs as root with `NoNewPrivileges=false`; a panel compromise becomes a host compromise.
+5. The panel service still runs as root; systemd hardening limits some exposure, but a panel compromise can still reach privileged engine and update operations.
 6. Client and inbound expiry/traffic limits are not enforced in generated sing-box/Xray configurations.
 
 The secret URL path is useful as a scanner-noise reduction measure, but it is not an authentication or authorization boundary.
@@ -109,7 +109,7 @@ Required change:
 
 ### C5. The management process runs as root
 
-The systemd unit does not set a service user and explicitly disables `NoNewPrivileges`. It can write `/etc` configuration files, start/stop services, replace binaries, and run shell commands.
+The systemd unit does not set a service user. The current unit enables `NoNewPrivileges=true` and `ProtectSystem=strict`, but the panel can still perform privileged engine and update operations and write to its configured writable paths.
 
 Evidence:
 

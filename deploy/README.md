@@ -2,6 +2,8 @@
 
 ## Prerequisites
 
+The installer requires root because it creates the `vpn-panel` service account and a narrowly scoped root helper. After installation, the web process runs as `vpn-panel`; it does not run as root. On hosts where you cannot install system services, run the panel as the account that owns the files and use `deploy/update.sh` manually. The one-click in-panel updater and core binary updater require the root helper.
+
 | Requirement | Details |
 |---|---|
 | **Server OS** | Debian 12 / 13 (Trixie) or Ubuntu 22.04+ |

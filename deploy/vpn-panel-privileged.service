@@ -1,0 +1,27 @@
+[Unit]
+Description=VPN Panel privileged operation helper
+After=local-fs.target
+Before=vpn-panel.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/node /opt/vpn-panel/deploy/vpn-panel-privileged.js
+User=root
+Group=vpn-panel
+RuntimeDirectory=vpn-panel
+RuntimeDirectoryMode=0750
+Environment=NODE_ENV=production
+Environment=PANEL_DIR=/opt/vpn-panel
+Environment=PRIVILEGED_SOCKET=/run/vpn-panel/privileged.sock
+Environment=PRIVILEGED_STAGING_DIR=/opt/vpn-panel/.privileged-staging
+EnvironmentFile=-/opt/vpn-panel/.env
+Restart=on-failure
+RestartSec=2s
+NoNewPrivileges=false
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/run/vpn-panel /opt/vpn-panel /etc/sing-box /etc/xray /usr/local/bin /usr/local/share/xray
+
+[Install]
+WantedBy=multi-user.target

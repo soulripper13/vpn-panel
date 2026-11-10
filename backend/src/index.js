@@ -22,6 +22,7 @@ const cfg = require('./config/app-config');
 // Ensure database is initialized
 const db = require('./config/database');
 const Settings = require('./models/Settings');
+const PanelUpdaterService = require('./services/panel-updater');
 const { importExistingConfigs } = require('./utils/importer');
 importExistingConfigs();
 
@@ -198,6 +199,12 @@ app.use(sessionParser);
 // CSRF & Origin Protection (C4)
 app.use(csrfProtection);
 
+// Local update watchdog probe. It exposes the app version and readiness, without host details.
+app.get('/healthz', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  return res.status(200).json({ success: true, version: PanelUpdaterService.getCurrentVersion().version });
+});
+
 // ─── Base Path Gatekeeper ─────────────────────────────────────────────────────
 
 app.use((req, res, next) => {
@@ -232,6 +239,16 @@ app.use((req, res, next) => {
 
   // 5. Any other request (scanners, bots hitting /, /admin, /login, etc.) gets 404
   return res.status(404).send('Cannot GET ' + req.path);
+});
+
+// Keep state-changing APIs quiescent while files are being promoted or rolled back.
+app.use('/api', (req, res, next) => {
+  if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method.toUpperCase())) return next();
+  if (req.path === '/auth/login' || req.path === '/engine/panel/update/status') return next();
+  const update = PanelUpdaterService.getUpdateProgress();
+  if (!['running', 'restarting'].includes(update.status)) return next();
+  res.setHeader('Retry-After', '10');
+  return res.status(503).json({ success: false, message: 'Panel update is in progress. Retry after it completes.' });
 });
 
 // ─── Rate Limiting (Mounted AFTER path normalization) (C4) ────────────────────

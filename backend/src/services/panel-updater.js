@@ -10,12 +10,16 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { exec, spawn } = require('child_process');
+const { execFile } = require('child_process');
 const util = require('util');
 const https = require('https');
+const crypto = require('crypto');
 const cfg = require('../config/app-config');
+const db = require('../config/database');
+const privileged = require('./privileged-client');
+const PANEL_RELEASE_PUBLIC_KEY = fs.readFileSync(path.join(__dirname, '../../../deploy/panel-release-public-key.pem'), 'utf8');
 
-const execAsync = util.promisify(exec);
+const execFileAsync = util.promisify(execFile);
 
 // Cache release info for 5 minutes
 let releaseCache = { data: null, timestamp: 0 };
@@ -32,12 +36,130 @@ let updateState = {
   finishedAt: null,
 };
 
+try {
+  const persisted = JSON.parse(fs.readFileSync(path.join(path.dirname(cfg.DB_PATH), 'panel-update-state.json'), 'utf8'));
+  if (persisted && ['restarting', 'completed', 'failed'].includes(persisted.status)) {
+    updateState = { ...updateState, ...persisted };
+  }
+} catch {}
+
 function addLog(msg) {
   const time = new Date().toLocaleTimeString();
   const line = `[${time}] ${msg}`;
   updateState.logs.push(line);
   if (updateState.logs.length > 300) {
     updateState.logs.shift();
+  }
+  persistUpdateState();
+}
+
+function getUpdateStatePath() {
+  return path.join(path.dirname(cfg.DB_PATH), 'panel-update-state.json');
+}
+
+function persistUpdateState() {
+  try {
+    const statePath = getUpdateStatePath();
+    const tempPath = `${statePath}.${process.pid}.tmp`;
+    fs.mkdirSync(path.dirname(statePath), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(tempPath, JSON.stringify(updateState), { mode: 0o600 });
+    fs.renameSync(tempPath, statePath);
+  } catch {}
+}
+
+function pathExists(filePath) {
+  try { fs.lstatSync(filePath); return true; } catch { return false; }
+}
+
+function removePath(filePath) {
+  fs.rmSync(filePath, { recursive: true, force: true });
+}
+
+function restoreTransaction(panelDir, backupDir, targets) {
+  for (const entry of [...targets].reverse()) {
+    const livePath = path.resolve(panelDir, entry.target);
+    const savedPath = path.resolve(backupDir, entry.backup);
+    if (!livePath.startsWith(`${path.resolve(panelDir)}${path.sep}`) || !savedPath.startsWith(`${path.resolve(backupDir)}${path.sep}`)) {
+      throw new Error('Unsafe path in update transaction');
+    }
+    const needsRestore = entry.state === 'backed_up' || entry.state === 'installed' ||
+      (entry.existed && pathExists(savedPath) && !pathExists(livePath));
+    if (!needsRestore) continue;
+    if (entry.existed && !pathExists(savedPath)) {
+      throw new Error(`Rollback copy is missing for ${entry.target}; kept the current path in place.`);
+    }
+    removePath(livePath);
+    if (entry.existed && pathExists(savedPath)) {
+      fs.mkdirSync(path.dirname(livePath), { recursive: true });
+      fs.renameSync(savedPath, livePath);
+    }
+  }
+}
+
+function writeTransaction(backupDir, transaction) {
+  const filePath = path.join(backupDir, 'transaction.json');
+  const tempPath = `${filePath}.${process.pid}.tmp`;
+  fs.writeFileSync(tempPath, JSON.stringify(transaction, null, 2), { mode: 0o600 });
+  fs.renameSync(tempPath, filePath);
+}
+
+function getStagingIdentity() {
+  if (typeof process.getuid !== 'function' || process.getuid() !== 0) {
+    throw new Error('A root-managed panel update must stage package scripts as an unprivileged account.');
+  }
+  const passwd = fs.readFileSync('/etc/passwd', 'utf8');
+  const entry = passwd.split(/\r?\n/).map((line) => line.split(':'))
+    .find((fields) => fields[0] === 'nobody' && Number(fields[2]) > 0);
+  if (!entry) throw new Error('Could not find the unprivileged nobody account for safe update staging.');
+  return { uid: Number(entry[2]), gid: Number(entry[3]) };
+}
+
+function assertNoSymbolicLinks(root) {
+  const stack = [root];
+  while (stack.length) {
+    const current = stack.pop();
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const fullPath = path.join(current, entry.name);
+      if (entry.isSymbolicLink()) throw new Error(`Symbolic links are not allowed in the release archive: ${fullPath}`);
+      if (entry.isDirectory()) stack.push(fullPath);
+    }
+  }
+}
+
+function directoryBytes(root) {
+  if (!pathExists(root)) return 0;
+  const stat = fs.lstatSync(root);
+  if (stat.isSymbolicLink()) return 0;
+  if (!stat.isDirectory()) return stat.size;
+  return fs.readdirSync(root).reduce((sum, name) => sum + directoryBytes(path.join(root, name)), 0);
+}
+
+function assertUpdateDiskSpace(panelDir, archiveBytes) {
+  if (typeof fs.statfsSync !== 'function') throw new Error('Cannot safely check available disk space on this Node.js version.');
+  const stats = fs.statfsSync(panelDir);
+  const available = stats.bavail * stats.bsize;
+  const existingModules = directoryBytes(path.join(panelDir, 'backend/node_modules'));
+  const databaseBytes = pathExists(cfg.DB_PATH) ? fs.statSync(cfg.DB_PATH).size : 0;
+  const required = Math.max(
+    512 * 1024 * 1024,
+    existingModules * 2 + databaseBytes * 2 + archiveBytes * 2 + 256 * 1024 * 1024,
+  );
+  if (available < required) {
+    throw new Error(`Not enough free disk space for a recoverable update. Need about ${Math.ceil(required / 1024 / 1024)} MB; only ${Math.floor(available / 1024 / 1024)} MB are available.`);
+  }
+}
+
+async function checkJavaScriptSyntax(rootDir) {
+  const pending = [rootDir];
+  while (pending.length) {
+    const current = pending.pop();
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const fullPath = path.join(current, entry.name);
+      if (entry.isDirectory()) pending.push(fullPath);
+      else if (entry.isFile() && entry.name.endsWith('.js')) {
+        await execFileAsync(process.execPath, ['--check', fullPath], { timeout: 15000 });
+      }
+    }
   }
 }
 
@@ -71,7 +193,12 @@ function fetchJson(url) {
 
     const req = https.get(url, opts, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        return fetchJson(res.headers.location).then(resolve).catch(reject);
+        let redirected;
+        try { redirected = new URL(res.headers.location, url); } catch { return reject(new Error('Invalid GitHub API redirect')); }
+        if (redirected.protocol !== 'https:' || redirected.hostname !== 'api.github.com') {
+          return reject(new Error('Unexpected GitHub API redirect destination'));
+        }
+        return fetchJson(redirected.href).then(resolve).catch(reject);
       }
 
       if (res.statusCode === 404) {
@@ -83,7 +210,15 @@ function fetchJson(url) {
       }
 
       let data = '';
-      res.on('data', (chunk) => { data += chunk; });
+      let received = 0;
+      res.on('data', (chunk) => {
+        received += chunk.length;
+        if (received > 2 * 1024 * 1024) {
+          req.destroy(new Error('GitHub API response is too large'));
+          return;
+        }
+        data += chunk;
+      });
       res.on('end', () => {
         try {
           resolve(JSON.parse(data));
@@ -119,7 +254,7 @@ class PanelUpdaterService {
    * Get current panel version
    */
   static getCurrentVersion() {
-    let version = '1.3.0';
+    let version = '1.4.0';
     let commit = '';
     let shortCommit = '';
     let buildDate = new Date().toISOString().split('T')[0];
@@ -172,25 +307,17 @@ class PanelUpdaterService {
 
     let release = null;
 
-    // 1. Try releases/latest
+    // 1. Try the latest published release.
     try {
       release = await fetchJson(releasesLatestUrl);
-    } catch (e) {
-      try {
-        const { stdout } = await execAsync(`curl -sL --connect-timeout 5 -H "User-Agent: vpn-panel" "${releasesLatestUrl}"`);
-        release = JSON.parse(stdout);
-        if (release && release.message && release.message.includes('Not Found')) {
-          release = null;
-        }
-      } catch {}
-    }
+    } catch {}
 
     // 2. Fallback to releases list
     if (!release || !release.tag_name) {
       try {
         const list = await fetchJson(releasesListUrl);
         if (Array.isArray(list) && list.length > 0) {
-          release = list[0];
+          release = list.find((item) => item?.tag_name && !item.draft && !item.prerelease) || null;
         }
       } catch {}
     }
@@ -211,8 +338,11 @@ class PanelUpdaterService {
     const releaseName = release?.name || rawTag;
     const releaseNotes = release?.body || (release ? `Release ${rawTag}` : 'Latest stable release');
     const publishedAt = release?.published_at || (tagItem ? new Date().toISOString() : '');
-    const tarballUrl = release?.tarball_url || tagItem?.tarball_url || `https://github.com/${repoOwner}/${repoName}/archive/refs/tags/${rawTag}.tar.gz`;
     const htmlUrl = release?.html_url || `https://github.com/${repoOwner}/${repoName}/releases`;
+    const assets = release?.assets || [];
+    const bundle = assets.find((asset) => asset.name === `vpn-panel-v${latestVersion}.tar.gz`);
+    const manifest = assets.find((asset) => asset.name === `vpn-panel-v${latestVersion}.manifest.json`);
+    const signature = assets.find((asset) => asset.name === `vpn-panel-v${latestVersion}.manifest.sig`);
 
     const result = {
       latestVersion,
@@ -220,13 +350,44 @@ class PanelUpdaterService {
       releaseName,
       releaseNotes,
       publishedAt,
-      tarballUrl,
+      tarballUrl: bundle?.browser_download_url || null,
+      manifestUrl: manifest?.browser_download_url || null,
+      signatureUrl: signature?.browser_download_url || null,
       htmlUrl,
       releaseUrl: `https://github.com/${repoOwner}/${repoName}`,
+      isPublishedRelease: Boolean(release?.tag_name && bundle && manifest && signature),
     };
 
     releaseCache = { data: result, timestamp: now };
     return result;
+  }
+
+  static async checkPanelReleaseByTag(tagName) {
+    const normalizedTag = String(tagName || '').replace(/^v/, '');
+    if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(normalizedTag)) {
+      throw new Error('Invalid panel release version');
+    }
+    const release = await fetchJson(`https://api.github.com/repos/soulripper13/vpn-panel/releases/tags/v${normalizedTag}`);
+    if (!release?.tag_name || release.draft || release.prerelease) {
+      throw new Error(`Published release v${normalizedTag} was not found`);
+    }
+    const assets = release.assets || [];
+    const bundle = assets.find((asset) => asset.name === `vpn-panel-v${normalizedTag}.tar.gz`);
+    const manifest = assets.find((asset) => asset.name === `vpn-panel-v${normalizedTag}.manifest.json`);
+    const signature = assets.find((asset) => asset.name === `vpn-panel-v${normalizedTag}.manifest.sig`);
+    if (!bundle || !manifest || !signature) throw new Error('Release is missing its signed panel bundle.');
+    return {
+      latestVersion: normalizedTag,
+      tagName: release.tag_name,
+      tarballUrl: bundle.browser_download_url,
+      manifestUrl: manifest.browser_download_url,
+      signatureUrl: signature.browser_download_url,
+      releaseName: release.name || release.tag_name,
+      releaseNotes: release.body || '',
+      publishedAt: release.published_at || '',
+      htmlUrl: release.html_url || 'https://github.com/soulripper13/vpn-panel/releases',
+      isPublishedRelease: true,
+    };
   }
 
   /**
@@ -264,6 +425,19 @@ class PanelUpdaterService {
    * Get live update progress & logs
    */
   static getUpdateProgress() {
+    try {
+      const persisted = JSON.parse(fs.readFileSync(getUpdateStatePath(), 'utf8'));
+      if (persisted?.startedAt && persisted.startedAt >= (updateState.startedAt || 0)) {
+        updateState = { ...updateState, ...persisted };
+      }
+    } catch {}
+    if (updateState.status === 'restarting' && updateState.startedAt && Date.now() - updateState.startedAt > 10 * 60 * 1000) {
+      updateState.status = 'failed';
+      updateState.step = 'watchdog_timeout';
+      updateState.error = 'The update watchdog did not report a result. Check the panel service before retrying.';
+      updateState.finishedAt = Date.now();
+      addLog(updateState.error);
+    }
     return {
       ...updateState,
       current: PanelUpdaterService.getCurrentVersion(),
@@ -312,185 +486,196 @@ class PanelUpdaterService {
    */
   static async _executePipeline(targetVersion = null) {
     const panelDir = PanelUpdaterService.getPanelDir();
-    const backupBaseDir = '/opt/vpn-panel-backups';
-    const timestamp = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 14);
-    const backupDir = path.join(backupBaseDir, `panel-update-${timestamp}`);
-    const tempDir = path.join(os.tmpdir(), `vpn-panel-update-${timestamp}`);
-    const tarballPath = path.join(os.tmpdir(), `vpn-panel-${timestamp}.tar.gz`);
+    const updateId = String(Date.now());
+    const backupDir = path.join(panelDir, '.panel-update-backups', updateId);
+    const tempDir = path.join(cfg.PRIVILEGED_STAGING_DIR, `panel-update-${updateId}`);
+    const tarballPath = path.join(cfg.PRIVILEGED_STAGING_DIR, `vpn-panel-${updateId}.tar.gz`);
+    const resolvedPanelDir = path.resolve(panelDir);
+    const resolvedDbPath = path.resolve(cfg.DB_PATH);
+    let transaction = null;
+    let restartScheduled = false;
+    let watchdogScheduled = false;
+    let stagingIdentity;
 
     try {
-      // ── Step 1: Backup current panel state (progress: 15%) ───────────────
-      updateState.step = 'backup';
-      updateState.progress = 15;
-      addLog(`Creating safe pre-update backup at ${backupDir}...`);
-
-      if (fs.existsSync('/opt/vpn-panel')) {
-        await execAsync(`mkdir -p "${backupDir}"`);
-        if (fs.existsSync(path.join(panelDir, 'data/panel.db'))) {
-          await execAsync(`cp -a "${path.join(panelDir, 'data/panel.db')}" "${backupDir}/panel.db" 2>/dev/null || true`);
-          addLog('Backed up SQLite database (panel.db).');
-        }
-        if (fs.existsSync(path.join(panelDir, '.env'))) {
-          await execAsync(`cp -a "${path.join(panelDir, '.env')}" "${backupDir}/.env" 2>/dev/null || true`);
-          addLog('Backed up environment config (.env).');
-        }
-      } else {
-        addLog('Local development directory detected — skipped system backup.');
+      if (os.platform() !== 'linux' || !fs.existsSync('/run/systemd/system') || !fs.existsSync('/etc/systemd/system/vpn-panel.service')) {
+        throw new Error('Panel self-update requires the installed systemd service; use deploy/update.sh for other installations.');
       }
+      if (!resolvedDbPath.startsWith(`${resolvedPanelDir}${path.sep}`)) {
+        throw new Error('Panel self-update requires the database to be inside the panel installation so it can be restored safely.');
+      }
+      stagingIdentity = typeof process.getuid === 'function' && process.getuid() === 0
+        ? getStagingIdentity()
+        : { uid: process.getuid?.() ?? 0, gid: process.getgid?.() ?? 0 };
 
-      // ── Step 2: Download latest release archive from GitHub (progress: 35%) ─
+      fs.mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+      fs.mkdirSync(tempDir, { recursive: true, mode: 0o700 });
+      if (typeof process.getuid !== 'function' || process.getuid() === 0) fs.chownSync(tempDir, stagingIdentity.uid, stagingIdentity.gid);
       updateState.step = 'download';
-      updateState.progress = 35;
+      updateState.progress = 15;
+      addLog('Preparing a staged release; the live installation will remain untouched until checks pass.');
 
-      const releaseInfo = await PanelUpdaterService.checkPanelRelease(true);
-      const tagToDownload = targetVersion ? `v${targetVersion.replace(/^v/, '')}` : (releaseInfo?.tagName || 'main');
-      let archiveUrl = releaseInfo?.tarballUrl;
-      if (!archiveUrl || targetVersion) {
-        archiveUrl = `https://github.com/soulripper13/vpn-panel/archive/refs/tags/${tagToDownload}.tar.gz`;
+      const releaseInfo = targetVersion
+        ? await PanelUpdaterService.checkPanelReleaseByTag(targetVersion)
+        : await PanelUpdaterService.checkPanelRelease(true);
+      if (!releaseInfo?.isPublishedRelease || !releaseInfo.tarballUrl) {
+        throw new Error('Only published, tagged releases can be installed from the panel.');
       }
-
-      addLog(`Downloading release package ${tagToDownload} from GitHub (${archiveUrl})...`);
-
-      // Try tag download, fallback to main branch if tag not ready yet
-      let downloadOk = false;
-      try {
-        await execAsync(`curl -fsSL --connect-timeout 15 -o "${tarballPath}" "${archiveUrl}"`);
-        if (fs.existsSync(tarballPath) && fs.statSync(tarballPath).size > 1024) {
-          downloadOk = true;
+      const manifestPath = `${tarballPath}.manifest.json`;
+      const signaturePath = `${tarballPath}.manifest.sig`;
+      const downloadReleaseAsset = async (url, destPath) => {
+        const assetUrl = new URL(url);
+        if (assetUrl.protocol !== 'https:' || !['github.com', 'objects.githubusercontent.com'].includes(assetUrl.hostname)) {
+          throw new Error('Release downloads must use HTTPS GitHub release assets.');
         }
-      } catch {}
-
-      if (!downloadOk) {
-        archiveUrl = 'https://github.com/soulripper13/vpn-panel/archive/refs/heads/main.tar.gz';
-        addLog(`Tag archive unavailable, falling back to main release branch (${archiveUrl})...`);
-        await execAsync(`curl -fsSL --connect-timeout 15 -o "${tarballPath}" "${archiveUrl}"`);
-      }
-
-      if (!fs.existsSync(tarballPath) || fs.statSync(tarballPath).size < 1024) {
-        throw new Error('Downloaded archive is missing or corrupted.');
-      }
-      addLog(`Archive downloaded successfully (${Math.round(fs.statSync(tarballPath).size / 1024)} KB).`);
-
-      // ── Step 3: Extract archive (progress: 50%) ───────────────────────────
-      updateState.step = 'extract';
-      updateState.progress = 50;
-      addLog('Extracting update package...');
-      await execAsync(`mkdir -p "${tempDir}" && tar -xzf "${tarballPath}" -C "${tempDir}"`);
-
-      // Find extracted root directory dynamically (e.g. vpn-panel-1.2.0 or vpn-panel-main)
-      const extractedEntries = fs.readdirSync(tempDir);
-      const extractedDirName = extractedEntries.find((d) => d.startsWith('vpn-panel') && fs.statSync(path.join(tempDir, d)).isDirectory());
-      if (!extractedDirName) {
-        throw new Error('Invalid archive structure: root directory not found.');
-      }
-      const extractedRoot = path.join(tempDir, extractedDirName);
-
-      if (!fs.existsSync(path.join(extractedRoot, 'backend'))) {
-        throw new Error('Invalid archive structure: backend directory not found in release.');
-      }
-      addLog(`Archive extracted and verified (${extractedDirName}).`);
-
-      // ── Step 4: Deploy files (progress: 70%) ──────────────────────────────
-      updateState.step = 'deploy_files';
-      updateState.progress = 70;
-      addLog('Deploying updated backend, frontend assets, and deploy scripts...');
-
-      const targetBackend = path.join(panelDir, 'backend');
-      const targetPublic = path.join(panelDir, 'backend/public');
-      const targetRootPublic = path.join(panelDir, 'public');
-      const targetDeploy = path.join(panelDir, 'deploy');
-
-      await execAsync(`mkdir -p "${targetBackend}" "${targetPublic}" "${targetRootPublic}" "${targetDeploy}"`);
-
-      // Copy backend files (excluding node_modules and .env)
-      if (fs.existsSync(path.join(extractedRoot, 'backend/src'))) {
-        await execAsync(`cp -rf "${path.join(extractedRoot, 'backend/src')}" "${targetBackend}/"`);
-      }
-      if (fs.existsSync(path.join(extractedRoot, 'backend/package.json'))) {
-        await execAsync(`cp -f "${path.join(extractedRoot, 'backend/package.json')}" "${targetBackend}/package.json"`);
-      }
-
-      // Copy pre-built frontend dist/public assets
-      if (fs.existsSync(path.join(extractedRoot, 'backend/public'))) {
-        await execAsync(`cp -rf "${path.join(extractedRoot, 'backend/public')}"/* "${targetPublic}/"`);
-        await execAsync(`cp -rf "${path.join(extractedRoot, 'backend/public')}"/* "${targetRootPublic}/"`);
-        addLog('Frontend web interface updated.');
-      }
-
-      // Copy deploy scripts
-      if (fs.existsSync(path.join(extractedRoot, 'deploy'))) {
-        await execAsync(`cp -rf "${path.join(extractedRoot, 'deploy')}"/* "${targetDeploy}/"`);
-        await execAsync(`chmod +x "${targetDeploy}"/*.sh 2>/dev/null || true`);
-      }
-
-      // Record updated version into version.json
-      const newVersion = releaseInfo?.latestVersion || targetVersion || '1.2.0';
-      const versionJson = {
-        version: newVersion,
-        tagName: `v${newVersion}`,
-        buildDate: new Date().toISOString(),
+        await execFileAsync('curl', [
+          '--fail', '--silent', '--show-error', '--location', '--proto', '=https', '--proto-redir', '=https',
+          '--connect-timeout', '15', '--max-time', '180', '--output', destPath, assetUrl.href,
+        ], { timeout: 200000 });
       };
-      fs.writeFileSync(path.join(targetBackend, 'version.json'), JSON.stringify(versionJson, null, 2));
+      await Promise.all([
+        downloadReleaseAsset(releaseInfo.tarballUrl, tarballPath),
+        downloadReleaseAsset(releaseInfo.manifestUrl, manifestPath),
+        downloadReleaseAsset(releaseInfo.signatureUrl, signaturePath),
+      ]);
+      fs.chmodSync(tarballPath, 0o644);
+      if (!pathExists(tarballPath) || fs.statSync(tarballPath).size < 1024) {
+        throw new Error('Downloaded release archive is missing or too small.');
+      }
+      const manifestBytes = fs.readFileSync(manifestPath);
+      const signedManifest = JSON.parse(manifestBytes.toString('utf8'));
+      if (!crypto.verify(null, manifestBytes, PANEL_RELEASE_PUBLIC_KEY, fs.readFileSync(signaturePath))) {
+        throw new Error('Panel release publisher signature verification failed.');
+      }
+      const archiveDigest = crypto.createHash('sha256').update(fs.readFileSync(tarballPath)).digest('hex');
+      if (signedManifest.version !== releaseInfo.latestVersion || signedManifest.algorithm !== 'ed25519' ||
+          signedManifest.archive !== `vpn-panel-v${signedManifest.version}.tar.gz` || signedManifest.sha256 !== archiveDigest) {
+        throw new Error('Panel release bundle does not match its signed manifest.');
+      }
+      assertUpdateDiskSpace(panelDir, fs.statSync(tarballPath).size);
+      addLog(`Downloaded published release ${releaseInfo.tagName}.`);
 
-      addLog(`All updated application files deployed (v${newVersion}).`);
-
-      // ── Step 5: Install/update backend dependencies (progress: 85%) ────────
-      updateState.step = 'dependencies';
-      updateState.progress = 85;
-      addLog('Updating production npm dependencies with package-lock...');
-
-      try {
-        const installCmd = fs.existsSync(path.join(targetBackend, 'package-lock.json'))
-          ? 'npm ci --omit=dev --silent 2>/dev/null || npm install --production --silent'
-          : 'npm install --production --silent';
-        await execAsync(installCmd, {
-          cwd: targetBackend,
-          timeout: 120000,
-        });
-        addLog('Dependencies updated successfully.');
-      } catch (npmErr) {
-        addLog(`Warning: dependency install warning (${npmErr.message}) - continuing.`);
+      updateState.step = 'extract';
+      updateState.progress = 30;
+      await execFileAsync('tar', ['--no-same-owner', '--no-same-permissions', '-xzf', tarballPath, '-C', tempDir], {
+        timeout: 60000, uid: stagingIdentity.uid, gid: stagingIdentity.gid,
+      });
+      const extractedEntries = fs.readdirSync(tempDir).filter((entry) => entry.startsWith('vpn-panel-'));
+      if (extractedEntries.length !== 1) throw new Error('Release archive has an unexpected directory layout.');
+      const extractedRoot = path.join(tempDir, extractedEntries[0]);
+      const sourceBackend = path.join(extractedRoot, 'backend');
+      const sourcePublic = path.join(sourceBackend, 'public');
+      const sourcePackagePath = path.join(sourceBackend, 'package.json');
+      const sourceLockPath = path.join(sourceBackend, 'package-lock.json');
+      const packageJson = JSON.parse(fs.readFileSync(sourcePackagePath, 'utf8'));
+      assertNoSymbolicLinks(extractedRoot);
+      if (!fs.existsSync(path.join(sourceBackend, 'src')) || !fs.existsSync(path.join(sourcePublic, 'index.html')) || !fs.existsSync(sourceLockPath)) {
+        throw new Error('Release is missing backend source, production assets, or its package lockfile.');
+      }
+      if (packageJson.version !== releaseInfo.latestVersion) {
+        throw new Error(`Release tag ${releaseInfo.latestVersion} does not match backend version ${packageJson.version}.`);
       }
 
-      // ── Step 6: Clean up temp files (progress: 92%) ────────────────────────
-      updateState.step = 'cleanup';
-      updateState.progress = 92;
-      addLog('Cleaning up temporary installation files...');
-      await execAsync(`rm -rf "${tarballPath}" "${tempDir}" 2>/dev/null || true`);
+      updateState.step = 'preflight';
+      updateState.progress = 45;
+      await checkJavaScriptSyntax(path.join(sourceBackend, 'src'));
+      const stagingEnv = {
+        ...process.env,
+        HOME: path.join(tempDir, 'home'),
+        npm_config_cache: path.join(tempDir, 'npm-cache'),
+      };
+      fs.mkdirSync(stagingEnv.HOME, { recursive: true, mode: 0o700 });
+      fs.mkdirSync(stagingEnv.npm_config_cache, { recursive: true, mode: 0o700 });
+      if (typeof process.getuid !== 'function' || process.getuid() === 0) {
+        fs.chownSync(stagingEnv.HOME, stagingIdentity.uid, stagingIdentity.gid);
+        fs.chownSync(stagingEnv.npm_config_cache, stagingIdentity.uid, stagingIdentity.gid);
+      }
+      await execFileAsync('npm', ['ci', '--omit=dev', '--silent'], {
+        cwd: sourceBackend, timeout: 300000, uid: stagingIdentity.uid, gid: stagingIdentity.gid, env: stagingEnv,
+      });
+      await execFileAsync('npm', ['test'], {
+        cwd: sourceBackend, timeout: 120000, uid: stagingIdentity.uid, gid: stagingIdentity.gid, env: stagingEnv,
+      });
+      addLog('Staged release passed JavaScript syntax checks, dependency installation, and backend tests.');
 
-      // ── Step 7: Restart service (progress: 100%) ───────────────────────────
+      const newVersion = releaseInfo.latestVersion;
+      fs.writeFileSync(path.join(sourceBackend, 'version.json'), JSON.stringify({
+        version: newVersion,
+        tagName: releaseInfo.tagName,
+        buildDate: new Date().toISOString(),
+      }, null, 2), { mode: 0o644 });
+      const stagedRootPublic = path.join(tempDir, 'root-public');
+      fs.cpSync(sourcePublic, stagedRootPublic, { recursive: true, errorOnExist: true });
+      const watchdogSource = path.join(extractedRoot, 'deploy/panel-update-watchdog.js');
+      if (!fs.existsSync(watchdogSource)) throw new Error('Release is missing its rollback watchdog.');
+      const watchdogPath = path.join(backupDir, 'watchdog.js');
+      fs.copyFileSync(watchdogSource, watchdogPath);
+      fs.chmodSync(watchdogPath, 0o600);
+      const dbBackupPath = path.join(backupDir, 'panel.db');
+      await db.backup(dbBackupPath);
+      fs.chmodSync(dbBackupPath, 0o600);
+
+      const replacements = [
+        ['backend/src', path.join(sourceBackend, 'src')],
+        ['backend/public', sourcePublic],
+        ['backend/package.json', sourcePackagePath],
+        ['backend/package-lock.json', sourceLockPath],
+        ['backend/node_modules', path.join(sourceBackend, 'node_modules')],
+        ['backend/version.json', path.join(sourceBackend, 'version.json')],
+        ['public', stagedRootPublic],
+        ['deploy/panel-update-watchdog.js', watchdogSource],
+      ];
+      transaction = {
+        updateId,
+        startedAt: updateState.startedAt,
+        promoted: false,
+        targets: replacements.map(([target], index) => ({
+          target,
+          backup: `previous-${index}`,
+          existed: pathExists(path.join(panelDir, target)),
+          state: 'pending',
+        })),
+      };
+      writeTransaction(backupDir, transaction);
+
+      updateState.step = 'deploy_files';
+      updateState.progress = 65;
+      addLog(`Promoting v${newVersion}; the prior files and database are retained for automatic rollback.`);
       updateState.step = 'restarting';
-      updateState.progress = 100;
+      updateState.progress = 92;
       updateState.status = 'restarting';
-      updateState.finishedAt = Date.now();
-      addLog(`Panel updated successfully to v${newVersion}!`);
-      addLog('Scheduling service restart in 2 seconds...');
-
-      // Schedule restart
-      if (os.platform() === 'linux' && fs.existsSync('/etc/systemd/system/vpn-panel.service')) {
-        const restartCmd = 'sleep 2 && systemctl daemon-reload && systemctl restart vpn-panel';
-        try {
-          await execAsync(`systemd-run bash -c "${restartCmd}"`);
-        } catch {
-          const child = spawn('bash', ['-c', restartCmd], { detached: true, stdio: 'ignore' });
-          child.unref();
-        }
-      } else {
-        addLog('Non-systemd / development environment detected — service restart simulated.');
-      }
+      updateState.finishedAt = null;
+      persistUpdateState();
+      const promotion = await privileged.callRequired('promote_panel', {
+        archivePath: tarballPath,
+        manifestPath,
+        signaturePath,
+        dbBackupPath,
+        updateId,
+        version: releaseInfo.latestVersion,
+      }, 60000);
+      if (!promotion) throw new Error('The privileged update helper is unavailable; use deploy/update.sh with the account that owns this installation.');
+      restartScheduled = Boolean(promotion);
+      addLog(`Restart scheduled for v${newVersion}; waiting for the independent health check.`);
     } catch (err) {
+      if (transaction && !restartScheduled) {
+        try {
+          restoreTransaction(panelDir, backupDir, transaction.targets);
+          addLog('Restored all changed files after the update could not be safely scheduled.');
+        } catch (rollbackErr) {
+          addLog(`Rollback failed: ${rollbackErr.message}`);
+        }
+      }
       updateState.status = 'failed';
       updateState.error = err.message;
       updateState.finishedAt = Date.now();
-      addLog(`ERROR: ${err.message}`);
-
-      // Rollback DB if needed
-      if (fs.existsSync(path.join(backupDir, 'panel.db'))) {
-        addLog('Restoring database from backup...');
-        await execAsync(`cp -a "${backupDir}/panel.db" "${path.join(panelDir, 'data/panel.db')}" 2>/dev/null || true`);
-        addLog('Database restored.');
-      }
+      addLog(`Update stopped: ${err.message}`);
       throw err;
+    } finally {
+      try { fs.rmSync(tarballPath, { force: true }); } catch {}
+      try { fs.rmSync(`${tarballPath}.manifest.json`, { force: true }); } catch {}
+      try { fs.rmSync(`${tarballPath}.manifest.sig`, { force: true }); } catch {}
+      try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch {}
     }
   }
 }
