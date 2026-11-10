@@ -1,0 +1,1 @@
+import{j as o,b as d}from"./index-CAR2LB_d.js";function i({size:s="md",className:e=""}){const r={xs:"w-3.5 h-3.5 border-2",sm:"w-4 h-4 border-2",md:"w-6 h-6 border-2",lg:"w-8 h-8 border-3"};return o.jsx("div",{className:d("animate-spin rounded-full border-slate-600 border-t-indigo-500",r[s]||r.md,e)})}export{i as S};

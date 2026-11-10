@@ -10,16 +10,34 @@ const path = require('path');
 const os   = require('os');
 const fs   = require('fs');
 
-// Try to load .env from panel root or backend root
-try {
-  require('dotenv').config({ path: '/opt/vpn-panel/.env' });
-} catch {}
-try {
-  require('dotenv').config({ path: path.join(__dirname, '../../../.env') });
-} catch {}
-try {
-  require('dotenv').config();
-} catch {}
+// Native .env loader (supports Node 20+ process.loadEnvFile with safe parsing fallback)
+function loadEnv(file) {
+  try {
+    if (typeof process.loadEnvFile === 'function' && fs.existsSync(file)) {
+      process.loadEnvFile(file);
+      return;
+    }
+  } catch {}
+  try {
+    if (!fs.existsSync(file)) return;
+    const lines = fs.readFileSync(file, 'utf8').split('\n');
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const idx = trimmed.indexOf('=');
+      if (idx === -1) continue;
+      const key = trimmed.slice(0, idx).trim();
+      const val = trimmed.slice(idx + 1).trim();
+      if (process.env[key] === undefined) {
+        process.env[key] = val.replace(/^["']|["']$/g, '');
+      }
+    }
+  } catch {}
+}
+
+loadEnv('/opt/vpn-panel/.env');
+loadEnv(path.join(__dirname, '../../../.env'));
+loadEnv(path.join(process.cwd(), '.env'));
 
 // ─── Panel ────────────────────────────────────────────────────────────────────
 const PANEL_PORT    = parseInt(process.env.PANEL_PORT || '2096', 10);
@@ -85,10 +103,13 @@ const CERT_FULLCHAIN = detectCert('fullchain');
 const CERT_PRIVKEY   = detectCert('privkey');
 
 // ─── Database ─────────────────────────────────────────────────────────────────
-const defaultDbPath = fs.existsSync('/opt/vpn-panel/data/panel.db')
-  ? '/opt/vpn-panel/data/panel.db'
-  : path.join(__dirname, '../../data/panel.db');
-const DB_PATH = process.env.DB_PATH || defaultDbPath;
+function detectDbPath() {
+  if (process.env.DB_PATH) return process.env.DB_PATH;
+  if (fs.existsSync('/opt/vpn-panel/data/panel.db')) return '/opt/vpn-panel/data/panel.db';
+  if (fs.existsSync('/opt/vpn-panel/data') || fs.existsSync('/opt/vpn-panel')) return '/opt/vpn-panel/data/panel.db';
+  return path.join(__dirname, '../../data/panel.db');
+}
+const DB_PATH = detectDbPath();
 
 // ─── Server Host / Domain ─────────────────────────────────────────────────────
 const SERVER_IP = process.env.SERVER_IP || '';

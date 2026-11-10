@@ -93,7 +93,7 @@ get_panel_version() {
     if [[ -f "${BACKEND_DIR}/package.json" ]]; then
         grep -o '"version": *"[^"]*"' "${BACKEND_DIR}/package.json" | head -n 1 | cut -d'"' -f4
     else
-        echo "1.4.18"
+        echo "1.4.19"
     fi
 }
 

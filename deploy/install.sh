@@ -562,8 +562,13 @@ chmod 750 "$(dirname "${SINGBOX_CONFIG}")" "$(dirname "${XRAY_CONFIG}")" 2>/dev/
 # ── Step 14: Initialize SQLite database ─────────────────────────────────────
 header "Initializing Database"
 
+mkdir -p "${DATA_DIR}"
+if [[ -f "${BACKEND_DIR}/data/panel.db" && ! -f "${DATA_DIR}/panel.db" ]]; then
+    mv "${BACKEND_DIR}/data/panel.db"* "${DATA_DIR}/" 2>/dev/null || true
+fi
+
 cd "${BACKEND_DIR}"
-node -e "
+DB_PATH="${DATA_DIR}/panel.db" PANEL_DIR="${PANEL_DIR}" node -e "
 const db = require('./src/config/database');
 const Settings = require('./src/models/Settings');
 Settings.set('panel_port', '${PANEL_PORT}');
@@ -571,7 +576,7 @@ Settings.set('web_base_path', '${WEB_BASE_PATH}');
 Settings.set('server_ip', '${SERVER_HOST}');
 if ('${CERT_FULLCHAIN}') Settings.set('cert_fullchain', '${CERT_FULLCHAIN}');
 if ('${CERT_PRIVKEY}') Settings.set('cert_privkey', '${CERT_PRIVKEY}');
-" 2>/dev/null || true
+"
 cd -
 
 success "Database initialized at ${DATA_DIR}/panel.db"
@@ -584,10 +589,12 @@ chown -R root:"${PANEL_GROUP}" "${PANEL_DIR}"
 chmod -R 750 "${PANEL_DIR}"
 install -d -o "${PANEL_USER}" -g "${PANEL_GROUP}" -m 0750 "${PANEL_DIR}/.privileged-staging"
 install -d -o "${PANEL_USER}" -g "${PANEL_GROUP}" -m 0770 "${PANEL_DIR}/.panel-update-backups"
-chown "${PANEL_USER}:${PANEL_GROUP}" "${PANEL_DIR}/data"
+chown -R "${PANEL_USER}:${PANEL_GROUP}" "${PANEL_DIR}/data"
 chmod 770 "${PANEL_DIR}/data"
-chown "${PANEL_USER}:${PANEL_GROUP}" "${PANEL_DIR}/data/panel.db"
-chmod 660 "${PANEL_DIR}/data/panel.db"
+if [[ -e "${PANEL_DIR}/data/panel.db" ]]; then
+    chown "${PANEL_USER}:${PANEL_GROUP}" "${PANEL_DIR}/data/panel.db"* 2>/dev/null || true
+    chmod 660 "${PANEL_DIR}/data/panel.db"* 2>/dev/null || true
+fi
 chown root:"${PANEL_GROUP}" "${ENV_FILE}"
 chmod 640 "${ENV_FILE}"
 chmod 755 "${FRONTEND_DIR}"
