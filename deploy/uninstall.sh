@@ -28,7 +28,14 @@ header()  { echo -e "\n${BOLD}${BLUE}══════════════�
 
 die() { error "$*"; exit 1; }
 
-[[ $EUID -eq 0 ]] || die "Must be run as root."
+if [[ $EUID -ne 0 ]]; then
+    if command -v sudo >/dev/null 2>&1; then
+        echo -e "${CYAN}[INFO]${NC}  Not running as root. Elevating privileges with sudo..."
+        exec sudo -E bash "$0" "$@"
+    else
+        die "Must be run as root (sudo or su -)."
+    fi
+fi
 
 header "VPN Panel — Uninstaller"
 echo ""
@@ -58,10 +65,18 @@ if systemctl is-enabled --quiet "${SERVICE_NAME}" 2>/dev/null; then
 fi
 
 # ── Remove service file ───────────────────────────────────────────────────────
+if systemctl is-active --quiet vpn-panel-privileged.service 2>/dev/null; then
+    systemctl stop vpn-panel-privileged.service 2>/dev/null || true
+fi
+if systemctl is-enabled --quiet vpn-panel-privileged.service 2>/dev/null; then
+    systemctl disable vpn-panel-privileged.service 2>/dev/null || true
+fi
+rm -f /etc/systemd/system/vpn-panel-privileged.service 2>/dev/null || true
+
 if [[ -f "${SERVICE_FILE}" ]]; then
     rm -f "${SERVICE_FILE}"
     systemctl daemon-reload
-    success "Service file removed."
+    success "Service files removed."
 fi
 
 # ── Remove firewall rule ──────────────────────────────────────────────────────

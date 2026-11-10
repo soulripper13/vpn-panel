@@ -61,3 +61,52 @@ test('panel update watchdog restores a partially promoted file set', () => {
     fs.rmSync(panelDir, { recursive: true, force: true });
   }
 });
+
+test('PanelUpdaterService._promoteDirectly promotes staged files directly when running as root', async () => {
+  const PanelUpdaterService = require('../src/services/panel-updater');
+  const panelDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vpn-panel-promote-test-'));
+  const backupDir = path.join(panelDir, 'backup');
+  const stageDir = path.join(panelDir, 'stage');
+  const liveTarget = path.join(panelDir, 'backend', 'src');
+  const stagedFile = path.join(stageDir, 'app.js');
+
+  fs.mkdirSync(liveTarget, { recursive: true });
+  fs.mkdirSync(backupDir, { recursive: true });
+  fs.mkdirSync(stageDir, { recursive: true });
+
+  fs.writeFileSync(path.join(liveTarget, 'app.js'), 'version 1');
+  fs.writeFileSync(stagedFile, 'version 2');
+
+  const replacements = [
+    ['backend/src', stageDir],
+  ];
+  const transaction = {
+    updateId: '9999',
+    startedAt: Date.now(),
+    promoted: false,
+    targets: [{
+      target: 'backend/src',
+      backup: 'previous-0',
+      existed: true,
+      state: 'pending',
+    }],
+  };
+
+  try {
+    const result = await PanelUpdaterService._promoteDirectly({
+      panelDir,
+      backupDir,
+      updateId: '9999',
+      version: '1.4.16',
+      watchdogPath: path.join(backupDir, 'watchdog.js'),
+      transaction,
+      replacements,
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(fs.readFileSync(path.join(liveTarget, 'app.js'), 'utf8'), 'version 2');
+    assert.equal(fs.readFileSync(path.join(backupDir, 'previous-0', 'app.js'), 'utf8'), 'version 1');
+  } finally {
+    fs.rmSync(panelDir, { recursive: true, force: true });
+  }
+});

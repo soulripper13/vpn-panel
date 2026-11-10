@@ -375,8 +375,21 @@ class BinaryUpdaterService {
       const stagedBinary = path.join(cfg.PRIVILEGED_STAGING_DIR, `sing-box-${Date.now()}`);
       fs.mkdirSync(cfg.PRIVILEGED_STAGING_DIR, { recursive: true, mode: 0o750 });
       fs.copyFileSync(extractedBin, stagedBinary);
-      const installed = await privileged.callRequired('install_binary', { engine: 'singbox', stagedBinary }, 60000);
-      if (!installed) throw new Error('The privileged helper is unavailable; binary updates require the installed root helper.');
+      let installed = null;
+      if (privileged.isConfigured()) {
+        installed = await privileged.callRequired('install_binary', { engine: 'singbox', stagedBinary }, 60000);
+      }
+      if (!installed) {
+        if (typeof process.getuid === 'function' && process.getuid() === 0) {
+          if (fs.existsSync(targetBin)) fs.copyFileSync(targetBin, `${targetBin}.bak`);
+          fs.copyFileSync(extractedBin, targetBin);
+          fs.chmodSync(targetBin, 0o755);
+          await execAsync(`systemctl restart "${cfg.SINGBOX_SERVICE}"`);
+          installed = { success: true, target: targetBin };
+        } else {
+          throw new Error('The privileged helper is unavailable; binary updates require the installed root helper.');
+        }
+      }
       try { fs.unlinkSync(stagedBinary); } catch {}
 
       // Clear cache
@@ -459,8 +472,24 @@ class BinaryUpdaterService {
       fs.copyFileSync(extractedBin, stagedBinary);
       fs.mkdirSync(stagedDataDir, { recursive: true, mode: 0o750 });
       for (const file of fs.readdirSync(tmpDir).filter((name) => name.endsWith('.dat'))) fs.copyFileSync(path.join(tmpDir, file), path.join(stagedDataDir, file));
-      const installed = await privileged.callRequired('install_binary', { engine: 'xray', stagedBinary, stagedDataDir }, 60000);
-      if (!installed) throw new Error('The privileged helper is unavailable; binary updates require the installed root helper.');
+      let installed = null;
+      if (privileged.isConfigured()) {
+        installed = await privileged.callRequired('install_binary', { engine: 'xray', stagedBinary, stagedDataDir }, 60000);
+      }
+      if (!installed) {
+        if (typeof process.getuid === 'function' && process.getuid() === 0) {
+          if (fs.existsSync(targetBin)) fs.copyFileSync(targetBin, `${targetBin}.bak`);
+          fs.copyFileSync(extractedBin, targetBin);
+          fs.chmodSync(targetBin, 0o755);
+          for (const file of fs.readdirSync(tmpDir).filter((name) => name.endsWith('.dat'))) {
+            fs.copyFileSync(path.join(tmpDir, file), path.join(path.dirname(targetBin), file));
+          }
+          await execAsync(`systemctl restart "${cfg.XRAY_SERVICE}"`);
+          installed = { success: true, target: targetBin };
+        } else {
+          throw new Error('The privileged helper is unavailable; binary updates require the installed root helper.');
+        }
+      }
       try { fs.unlinkSync(stagedBinary); } catch {}
       try { fs.rmSync(stagedDataDir, { recursive: true, force: true }); } catch {}
 

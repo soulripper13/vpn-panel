@@ -34,11 +34,27 @@ die() { error "$*"; exit 1; }
 
 trap 'error "Update failed on line $LINENO."; exit 1' ERR
 
-[[ $EUID -eq 0 ]] || die "Must be run as root."
-[[ -d "${PANEL_DIR}" ]] || die "Panel not installed at ${PANEL_DIR}. Run install.sh first."
-if ! id -u vpn-panel >/dev/null 2>&1 || ! grep -q '^User=vpn-panel$' "/etc/systemd/system/${SERVICE_NAME}.service" || [[ ! -f "${PANEL_DIR}/deploy/vpn-panel-privileged.service" ]]; then
-    die "This is a legacy root-run installation. Run the signed legacy migration first: curl -fsSL https://github.com/soulripper13/vpn-panel/releases/download/v1.4.15/migrate-legacy-install.sh | sudo bash"
+if [[ $EUID -ne 0 ]]; then
+    if command -v sudo >/dev/null 2>&1; then
+        echo -e "${CYAN}[INFO]${NC}  Not running as root. Elevating privileges with sudo..."
+        exec sudo -E bash "$0" "$@"
+    else
+        die "Must be run as root (sudo or su -)."
+    fi
 fi
+
+[[ -d "${PANEL_DIR}" ]] || die "Panel not installed at ${PANEL_DIR}. Run install.sh first."
+
+# Ensure vpn-panel service account and staging directories exist for isolated helper mode
+if ! id -u vpn-panel >/dev/null 2>&1; then
+    info "Setting up vpn-panel service account..."
+    useradd --system --home-dir "${PANEL_DIR}" --no-create-home --shell /usr/sbin/nologin vpn-panel 2>/dev/null || true
+fi
+PANEL_GROUP=$(id -gn vpn-panel 2>/dev/null || echo "vpn-panel")
+install -d -o vpn-panel -g "${PANEL_GROUP}" -m 0750 "${PANEL_DIR}/.privileged-staging" 2>/dev/null || true
+install -d -o vpn-panel -g "${PANEL_GROUP}" -m 0770 "${PANEL_DIR}/.panel-update-backups" 2>/dev/null || true
+chown -R vpn-panel:"${PANEL_GROUP}" "${DATA_DIR}" 2>/dev/null || true
+chmod 770 "${DATA_DIR}" 2>/dev/null || true
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_DIR="$(dirname "$SCRIPT_DIR")"
@@ -149,13 +165,17 @@ if [[ -d "${SOURCE_DIR}/deploy" ]]; then
     if [[ -f "${PANEL_DIR}/deploy/vpn-panel-privileged.service" ]]; then
         cp -f "${PANEL_DIR}/deploy/vpn-panel-privileged.service" /etc/systemd/system/vpn-panel-privileged.service
         systemctl daemon-reload
-        systemctl enable vpn-panel-privileged.service
-        systemctl restart vpn-panel-privileged.service
+        systemctl enable --now vpn-panel-privileged.service 2>/dev/null || systemctl restart vpn-panel-privileged.service 2>/dev/null || true
     fi
     if [[ -f "${SOURCE_DIR}/deploy/vpn-panel.service" ]]; then
         cp -f "${SOURCE_DIR}/deploy/vpn-panel.service" "/etc/systemd/system/${SERVICE_NAME}.service"
         success "Panel systemd sandbox rules updated."
     fi
+    chown -R root:"${PANEL_GROUP}" "${PANEL_DIR}" 2>/dev/null || true
+    chmod -R 750 "${PANEL_DIR}" 2>/dev/null || true
+    chown -R vpn-panel:"${PANEL_GROUP}" "${DATA_DIR}" "${PANEL_DIR}/.privileged-staging" "${PANEL_DIR}/.panel-update-backups" 2>/dev/null || true
+    chmod 770 "${DATA_DIR}" "${PANEL_DIR}/.panel-update-backups" 2>/dev/null || true
+    chmod 750 "${PANEL_DIR}/.privileged-staging" 2>/dev/null || true
 fi
 
 # Clean up temp downloads if any

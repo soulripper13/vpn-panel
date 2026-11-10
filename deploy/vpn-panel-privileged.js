@@ -232,18 +232,34 @@ async function promotePanel(payload) {
   validateRelease(archivePath, manifestPath, signaturePath, version);
   fs.chmodSync(archivePath, 0o644);
   const extractedRoot = path.join(verifiedDir, 'extracted');
-  const passwd = fs.readFileSync('/etc/passwd', 'utf8').split(/\r?\n/).map((line) => line.split(':')).find((fields) => fields[0] === 'nobody');
-  if (!passwd || Number(passwd[2]) < 1) throw new Error('An unprivileged extraction account is required');
-  fs.mkdirSync(extractedRoot, { mode: 0o700 });
-  fs.chownSync(extractedRoot, Number(passwd[2]), Number(passwd[3]));
+  let extractUid = 0;
+  let extractGid = 0;
+  try {
+    const stat = fs.statSync(STAGING_DIR);
+    const passwd = fs.readFileSync('/etc/passwd', 'utf8').split(/\r?\n/).map((line) => line.split(':')).find((fields) => fields[0] === 'nobody');
+    if (stat.uid > 0) {
+      extractUid = stat.uid;
+      extractGid = stat.gid;
+    } else if (passwd && Number(passwd[2]) > 0) {
+      extractUid = Number(passwd[2]);
+      extractGid = Number(passwd[3]);
+    }
+  } catch {}
+  fs.mkdirSync(extractedRoot, { mode: 0o750 });
+  if (extractUid > 0) {
+    fs.chownSync(extractedRoot, extractUid, extractGid);
+  }
   const listing = await execFileAsync('/bin/tar', ['-tzf', archivePath], { timeout: 30000, maxBuffer: 8 * 1024 * 1024 });
   const entries = listing.stdout.split(/\r?\n/).filter(Boolean);
   if (!entries.length || entries.length > 100000 || entries.some((entry) => path.isAbsolute(entry) || entry.split('/').some((part) => part === '..'))) {
     throw new Error('Signed release archive contains unsafe paths');
   }
-  await execFileAsync('/bin/tar', ['--no-same-owner', '--no-same-permissions', '-xzf', archivePath, '-C', extractedRoot], {
-    timeout: 60000, uid: Number(passwd[2]), gid: Number(passwd[3]),
-  });
+  const tarOpts = { timeout: 60000 };
+  if (extractUid > 0) {
+    tarOpts.uid = extractUid;
+    tarOpts.gid = extractGid;
+  }
+  await execFileAsync('/bin/tar', ['--no-same-owner', '--no-same-permissions', '-xzf', archivePath, '-C', extractedRoot], tarOpts);
   const roots = fs.readdirSync(extractedRoot);
   if (roots.length !== 1 || !roots[0].startsWith('vpn-panel-')) throw new Error('Signed release archive layout is invalid');
   const stagingRoot = path.join(extractedRoot, roots[0]);

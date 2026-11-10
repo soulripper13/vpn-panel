@@ -5,13 +5,19 @@ PANEL_DIR="${PANEL_DIR:-/opt/vpn-panel}"
 SERVICE_NAME="vpn-panel"
 PANEL_USER="vpn-panel"
 PANEL_GROUP="vpn-panel"
-VERSION="1.4.15"
+VERSION="1.4.16"
 RELEASE_ROOT="https://github.com/soulripper13/vpn-panel/releases/download/v${VERSION}"
 WORK_DIR="/tmp/vpn-panel-migration-${VERSION}-$$"
 BACKUP_DIR="/opt/vpn-panel-migration-backups/$(date +%Y%m%d_%H%M%S)"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
-[[ "$(id -u)" -eq 0 ]] || die "Run this script as root over SSH."
+if [[ "$(id -u)" -ne 0 ]]; then
+  if command -v sudo >/dev/null 2>&1; then
+    exec sudo -E bash "$0" "$@"
+  else
+    die "Run this script as root over SSH (or with sudo)."
+  fi
+fi
 [[ -d "${PANEL_DIR}" ]] || die "Panel directory not found: ${PANEL_DIR}"
 command -v curl >/dev/null || die "curl is required."
 command -v openssl >/dev/null || die "openssl is required."

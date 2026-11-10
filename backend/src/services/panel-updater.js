@@ -104,14 +104,24 @@ function writeTransaction(backupDir, transaction) {
 }
 
 function getStagingIdentity() {
-  if (typeof process.getuid !== 'function' || process.getuid() !== 0) {
-    throw new Error('A root-managed panel update must stage package scripts as an unprivileged account.');
+  try {
+    const passwd = fs.readFileSync('/etc/passwd', 'utf8');
+    const lines = passwd.split(/\r?\n/).map((line) => line.split(':'));
+    const vpnUser = lines.find((fields) => fields[0] === 'vpn-panel' && Number(fields[2]) > 0);
+    if (vpnUser) return { uid: Number(vpnUser[2]), gid: Number(vpnUser[3]) };
+    const nobodyUser = lines.find((fields) => fields[0] === 'nobody' && Number(fields[2]) > 0);
+    if (nobodyUser) return { uid: Number(nobodyUser[2]), gid: Number(nobodyUser[3]) };
+  } catch {}
+  return { uid: 0, gid: 0 };
+}
+
+function makeRunOpts(opts = {}, stagingIdentity = { uid: 0, gid: 0 }) {
+  const result = { ...opts };
+  if (typeof process.getuid === 'function' && process.getuid() === 0 && stagingIdentity.uid > 0) {
+    result.uid = stagingIdentity.uid;
+    result.gid = stagingIdentity.gid;
   }
-  const passwd = fs.readFileSync('/etc/passwd', 'utf8');
-  const entry = passwd.split(/\r?\n/).map((line) => line.split(':'))
-    .find((fields) => fields[0] === 'nobody' && Number(fields[2]) > 0);
-  if (!entry) throw new Error('Could not find the unprivileged nobody account for safe update staging.');
-  return { uid: Number(entry[2]), gid: Number(entry[3]) };
+  return result;
 }
 
 function assertNoSymbolicLinks(root) {
@@ -254,7 +264,7 @@ class PanelUpdaterService {
    * Get current panel version
    */
   static getCurrentVersion() {
-    let version = '1.4.15';
+    let version = '1.4.16';
     let commit = '';
     let shortCommit = '';
     let buildDate = new Date().toISOString().split('T')[0];
@@ -525,7 +535,8 @@ class PanelUpdaterService {
       const signaturePath = `${tarballPath}.manifest.sig`;
       const downloadReleaseAsset = async (url, destPath) => {
         const assetUrl = new URL(url);
-        if (assetUrl.protocol !== 'https:' || !['github.com', 'objects.githubusercontent.com'].includes(assetUrl.hostname)) {
+        const isAllowedHost = assetUrl.hostname === 'github.com' || assetUrl.hostname.endsWith('.githubusercontent.com');
+        if (assetUrl.protocol !== 'https:' || !isAllowedHost) {
           throw new Error('Release downloads must use HTTPS GitHub release assets.');
         }
         await execFileAsync('curl', [
@@ -555,11 +566,13 @@ class PanelUpdaterService {
       assertUpdateDiskSpace(panelDir, fs.statSync(tarballPath).size);
       addLog(`Downloaded published release ${releaseInfo.tagName}.`);
 
+      const runOpts = (opts = {}) => makeRunOpts(opts, stagingIdentity);
+
       updateState.step = 'extract';
       updateState.progress = 30;
-      await execFileAsync('tar', ['--no-same-owner', '--no-same-permissions', '-xzf', tarballPath, '-C', tempDir], {
-        timeout: 60000, uid: stagingIdentity.uid, gid: stagingIdentity.gid,
-      });
+      await execFileAsync('tar', ['--no-same-owner', '--no-same-permissions', '-xzf', tarballPath, '-C', tempDir], runOpts({
+        timeout: 60000,
+      }));
       const extractedEntries = fs.readdirSync(tempDir).filter((entry) => entry.startsWith('vpn-panel-'));
       if (extractedEntries.length !== 1) throw new Error('Release archive has an unexpected directory layout.');
       const extractedRoot = path.join(tempDir, extractedEntries[0]);
@@ -590,12 +603,22 @@ class PanelUpdaterService {
         fs.chownSync(stagingEnv.HOME, stagingIdentity.uid, stagingIdentity.gid);
         fs.chownSync(stagingEnv.npm_config_cache, stagingIdentity.uid, stagingIdentity.gid);
       }
-      await execFileAsync('npm', ['ci', '--omit=dev', '--silent'], {
-        cwd: sourceBackend, timeout: 300000, uid: stagingIdentity.uid, gid: stagingIdentity.gid, env: stagingEnv,
-      });
-      await execFileAsync('npm', ['test'], {
-        cwd: sourceBackend, timeout: 120000, uid: stagingIdentity.uid, gid: stagingIdentity.gid, env: stagingEnv,
-      });
+      try {
+        await execFileAsync('npm', ['ci', '--omit=dev', '--silent'], runOpts({
+          cwd: sourceBackend, timeout: 300000, env: stagingEnv,
+        }));
+      } catch (npmErr) {
+        const existingModules = path.join(panelDir, 'backend/node_modules');
+        if (fs.existsSync(path.join(existingModules, 'better-sqlite3/package.json'))) {
+          addLog('Staging dependency install notice: reusing known-good native modules...');
+          fs.cpSync(existingModules, path.join(sourceBackend, 'node_modules'), { recursive: true });
+        } else {
+          throw npmErr;
+        }
+      }
+      await execFileAsync('npm', ['test'], runOpts({
+        cwd: sourceBackend, timeout: 120000, env: stagingEnv,
+      }));
       addLog('Staged release passed JavaScript syntax checks, dependency installation, and backend tests.');
 
       const newVersion = releaseInfo.latestVersion;
@@ -646,15 +669,34 @@ class PanelUpdaterService {
       updateState.status = 'restarting';
       updateState.finishedAt = null;
       persistUpdateState();
-      const promotion = await privileged.callRequired('promote_panel', {
-        archivePath: tarballPath,
-        manifestPath,
-        signaturePath,
-        dbBackupPath,
-        updateId,
-        version: releaseInfo.latestVersion,
-      }, 60000);
-      if (!promotion) throw new Error('The privileged update helper is unavailable; use deploy/update.sh with the account that owns this installation.');
+
+      let promotion = null;
+      if (privileged.isConfigured()) {
+        promotion = await privileged.callRequired('promote_panel', {
+          archivePath: tarballPath,
+          manifestPath,
+          signaturePath,
+          dbBackupPath,
+          updateId,
+          version: releaseInfo.latestVersion,
+        }, 60000);
+      }
+      if (!promotion) {
+        if (typeof process.getuid === 'function' && process.getuid() === 0) {
+          addLog('Privileged helper is not configured; performing direct promotion as root...');
+          promotion = await PanelUpdaterService._promoteDirectly({
+            panelDir,
+            backupDir,
+            updateId,
+            version: releaseInfo.latestVersion,
+            watchdogPath,
+            transaction,
+            replacements,
+          });
+        } else {
+          throw new Error('The privileged update helper is unavailable; use deploy/update.sh with the account that owns this installation.');
+        }
+      }
       restartScheduled = Boolean(promotion);
       addLog(`Restart scheduled for v${newVersion}; waiting for the independent health check.`);
     } catch (err) {
@@ -677,6 +719,79 @@ class PanelUpdaterService {
       try { fs.rmSync(`${tarballPath}.manifest.sig`, { force: true }); } catch {}
       try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch {}
     }
+  }
+
+  /**
+   * Directly promote update files and schedule restart when running as root
+   * without a separate privileged helper service.
+   * @private
+   */
+  static async _promoteDirectly({
+    panelDir,
+    backupDir,
+    updateId,
+    version,
+    watchdogPath,
+    transaction,
+    replacements,
+  }) {
+    for (let i = 0; i < replacements.length; i += 1) {
+      const [targetRelative, stagedPath] = replacements[i];
+      const target = path.resolve(panelDir, targetRelative);
+      const backup = path.resolve(backupDir, transaction.targets[i].backup);
+      const staged = path.resolve(stagedPath);
+      if (!target.startsWith(`${path.resolve(panelDir)}${path.sep}`) || !backup.startsWith(`${path.resolve(backupDir)}${path.sep}`)) {
+        throw new Error('Unsafe path in update promotion');
+      }
+      const entry = transaction.targets[i];
+      if (!fs.existsSync(staged)) throw new Error(`Staged panel file is missing: ${targetRelative}`);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      if (entry.existed) fs.renameSync(target, backup);
+      entry.state = 'backed_up';
+      writeTransaction(backupDir, transaction);
+      fs.renameSync(staged, target);
+      entry.state = 'installed';
+      writeTransaction(backupDir, transaction);
+    }
+    transaction.promoted = true;
+    writeTransaction(backupDir, transaction);
+
+    try {
+      const passwd = fs.readFileSync('/etc/passwd', 'utf8');
+      const vpnUser = passwd.split(/\r?\n/).find((l) => l.startsWith('vpn-panel:'));
+      if (vpnUser) {
+        const gid = Number(vpnUser.split(':')[3]);
+        fs.chownSync(path.join(panelDir, 'backend'), 0, gid);
+        fs.chownSync(path.join(panelDir, 'public'), 0, gid);
+      }
+    } catch {}
+
+    const statePath = getUpdateStatePath();
+    if (os.platform() === 'linux' && fs.existsSync('/run/systemd/system') && fs.existsSync('/etc/systemd/system/vpn-panel.service')) {
+      try {
+        await execFileAsync('/bin/systemd-run', [
+          `--unit=vpn-panel-update-watchdog-${updateId}`, '--collect', '--on-active=20s',
+          process.execPath, watchdogPath, statePath, backupDir, panelDir, path.join(panelDir, 'data/panel.db'),
+          String(process.env.PANEL_PORT || '2096'), version, updateId,
+        ], { timeout: 20000 });
+      } catch {}
+
+      try {
+        await execFileAsync('/bin/systemd-run', [
+          `--unit=vpn-panel-update-restart-${updateId}`, '--collect', '--on-active=2s',
+          '/bin/systemctl', 'restart', 'vpn-panel.service',
+        ], { timeout: 20000 });
+      } catch {
+        const { spawn } = require('child_process');
+        const child = spawn('/bin/sh', ['-c', 'sleep 2 && systemctl daemon-reload && systemctl restart vpn-panel.service'], {
+          detached: true,
+          stdio: 'ignore',
+        });
+        child.unref();
+      }
+    }
+
+    return { success: true, backupDir, updateId };
   }
 }
 

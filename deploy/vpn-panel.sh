@@ -24,8 +24,12 @@ NC='\033[0m'
 
 check_root() {
     if [[ $EUID -ne 0 ]]; then
-        echo -e "${RED}[ERROR] This tool must be run as root (e.g. sudo vpn-panel).${NC}"
-        exit 1
+        if command -v sudo >/dev/null 2>&1; then
+            exec sudo "$0" "$@"
+        else
+            echo -e "${RED}[ERROR] This tool must be run as root (e.g. sudo vpn-panel).${NC}"
+            exit 1
+        fi
     fi
 }
 
@@ -89,7 +93,7 @@ get_panel_version() {
     if [[ -f "${BACKEND_DIR}/package.json" ]]; then
         grep -o '"version": *"[^"]*"' "${BACKEND_DIR}/package.json" | head -n 1 | cut -d'"' -f4
     else
-        echo "1.4.15"
+        echo "1.4.16"
     fi
 }
 

@@ -142,7 +142,11 @@ tar -xzf ${TARBALL}
 
 echo "Running install.sh..."
 chmod +x vpn-panel/deploy/install.sh
-bash vpn-panel/deploy/install.sh
+SUDO=""
+if [[ "\$(id -u)" -ne 0 ]]; then
+    SUDO="sudo -E"
+fi
+\$SUDO bash vpn-panel/deploy/install.sh
 
 echo "Cleaning up temp files..."
 rm -rf ${REMOTE_TMP}

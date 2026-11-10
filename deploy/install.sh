@@ -56,10 +56,22 @@ trap 'error "Install failed on line $LINENO. Check the output above for details.
 # ── Step 1: Preflight checks ──────────────────────────────────────────────────
 header "VPN Panel Installer — Preflight Checks"
 
-[[ $EUID -eq 0 ]] || die "This script must be run as root (sudo or su -)."
+if [[ $EUID -ne 0 ]]; then
+    if command -v sudo >/dev/null 2>&1; then
+        echo -e "${CYAN}[INFO]${NC}  Not running as root. Elevating privileges with sudo..."
+        if [[ -f "$0" ]]; then
+            exec sudo -E bash "$0" "$@"
+        else
+            exec sudo -E bash -c "$(curl -fsSL https://raw.githubusercontent.com/soulripper13/vpn-panel/main/deploy/install.sh)" "$@"
+        fi
+    else
+        die "This script must be run as root (sudo or su -)."
+    fi
+fi
 
 if [[ -e "${PANEL_DIR}/.env" || -e "${DATA_DIR}/panel.db" || -f "${SERVICE_FILE}" ]]; then
-    die "An existing VPN Panel installation was found at ${PANEL_DIR}. For an older root-run install, use the signed migration: curl -fsSL https://github.com/soulripper13/vpn-panel/releases/download/v1.4.15/migrate-legacy-install.sh | sudo bash. For an install that already runs as vpn-panel, use the panel updater."
+    warn "An existing VPN Panel installation was detected at ${PANEL_DIR}."
+    info "Existing configuration and database will be backed up safely before upgrade."
 fi
 
 if [[ -f /etc/os-release ]]; then
@@ -83,6 +95,7 @@ apt-get update -qq
 apt-get install -y --no-install-recommends \
     curl wget ca-certificates gnupg lsb-release \
     tar gzip unzip sqlite3 openssl ufw iptables jq git rsync \
+    build-essential python3 \
     2>/dev/null
 success "System packages installed."
 
