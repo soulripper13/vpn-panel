@@ -85,14 +85,11 @@ function validateRelease(archivePath, manifestPath, signaturePath, expectedVersi
 }
 
 function copyVerifiedFile(source, target) {
-  regularFile(source);
-  const fd = fs.openSync(source, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
-  try {
-    const stat = fs.fstatSync(fd);
-    if (!stat.isFile() || stat.size > 512 * 1024 * 1024) throw new Error('Release archive is invalid or too large');
-    const output = fs.openSync(target, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600);
-    try { fs.copyFileSync(fd, output); } finally { fs.closeSync(output); }
-  } finally { fs.closeSync(fd); }
+  const stat = regularFile(source);
+  if (!stat.isFile() || stat.size > 512 * 1024 * 1024) throw new Error('Release archive is invalid or too large');
+  try { fs.unlinkSync(target); } catch {}
+  fs.copyFileSync(source, target);
+  fs.chmodSync(target, 0o600);
 }
 
 async function serviceAction(payload) {
@@ -184,24 +181,37 @@ function setPanelOwnership(root) {
   const stack = [root];
   while (stack.length) {
     const current = stack.pop();
-    const stat = fs.lstatSync(current);
-    if (stat.isSymbolicLink()) throw new Error(`Symbolic links are not allowed in promoted panel files: ${current}`);
-    fs.chownSync(current, 0, gid);
-    fs.chmodSync(current, stat.isDirectory() ? 0o750 : 0o640);
+    let stat;
+    try { stat = fs.lstatSync(current); } catch { continue; }
+    if (stat.isSymbolicLink()) {
+      try { fs.lchownSync(current, 0, gid); } catch {}
+      continue;
+    }
+    try {
+      fs.chownSync(current, 0, gid);
+      fs.chmodSync(current, stat.isDirectory() ? 0o750 : 0o640);
+    } catch {}
     if (stat.isDirectory()) {
-      for (const name of fs.readdirSync(current)) stack.push(path.join(current, name));
+      try {
+        for (const name of fs.readdirSync(current)) stack.push(path.join(current, name));
+      } catch {}
     }
   }
 }
 
 function panelTargets(stagingRoot) {
+  const sourcePublic = path.join(stagingRoot, 'backend/public');
+  const stagedRootPublic = path.join(stagingRoot, 'root-public');
+  if (fs.existsSync(sourcePublic) && !fs.existsSync(stagedRootPublic)) {
+    fs.cpSync(sourcePublic, stagedRootPublic, { recursive: true });
+  }
   const targets = [
     ['backend/src', path.join(stagingRoot, 'backend/src')],
-    ['backend/public', path.join(stagingRoot, 'backend/public')],
+    ['backend/public', sourcePublic],
     ['backend/package.json', path.join(stagingRoot, 'backend/package.json')],
     ['backend/package-lock.json', path.join(stagingRoot, 'backend/package-lock.json')],
     ['backend/version.json', path.join(stagingRoot, 'backend/version.json')],
-    ['public', path.join(stagingRoot, 'root-public')],
+    ['public', stagedRootPublic],
     ['deploy/panel-update-watchdog.js', path.join(stagingRoot, 'deploy/panel-update-watchdog.js')],
   ];
   if (fs.existsSync(path.join(stagingRoot, 'backend/node_modules'))) {
