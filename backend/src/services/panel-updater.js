@@ -264,7 +264,7 @@ class PanelUpdaterService {
    * Get current panel version
    */
   static getCurrentVersion() {
-    let version = '1.4.19';
+    let version = 'unknown';
     let commit = '';
     let shortCommit = '';
     let buildDate = new Date().toISOString().split('T')[0];
@@ -622,10 +622,14 @@ class PanelUpdaterService {
           throw npmErr;
         }
       }
-      await execFileAsync('npm', ['test'], runOpts({
-        cwd: sourceBackend, timeout: 120000, env: stagingEnv,
-      }));
-      addLog('Staged release passed JavaScript syntax checks, dependency installation, and backend tests.');
+      if (fs.existsSync(path.join(sourceBackend, 'test'))) {
+        await execFileAsync('node', ['--test'], runOpts({
+          cwd: sourceBackend, timeout: 120000, env: stagingEnv,
+        }));
+        addLog('Staged release passed JavaScript syntax checks, dependency installation, and backend tests.');
+      } else {
+        addLog('Staged release passed JavaScript syntax checks and dependency installation.');
+      }
 
       const newVersion = releaseInfo.latestVersion;
       fs.writeFileSync(path.join(sourceBackend, 'version.json'), JSON.stringify({

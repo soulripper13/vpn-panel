@@ -5,7 +5,11 @@ PANEL_DIR="${PANEL_DIR:-/opt/vpn-panel}"
 SERVICE_NAME="vpn-panel"
 PANEL_USER="vpn-panel"
 PANEL_GROUP="vpn-panel"
-VERSION="1.4.19"
+VERSION="${VERSION:-}"
+if [[ -z "${VERSION}" || "${VERSION}" == "latest" ]]; then
+  VERSION=$(curl -sSL --connect-timeout 10 https://api.github.com/repos/soulripper13/vpn-panel/releases/latest 2>/dev/null | grep -o '"tag_name": *"v[^"]*"' | head -n 1 | cut -d'"' -f4 | sed 's/^v//' || true)
+  VERSION="${VERSION:-1.4.19}"
+fi
 RELEASE_ROOT="https://github.com/soulripper13/vpn-panel/releases/download/v${VERSION}"
 WORK_DIR="/tmp/vpn-panel-migration-${VERSION}-$$"
 BACKUP_DIR="/opt/vpn-panel-migration-backups/$(date +%Y%m%d_%H%M%S)"

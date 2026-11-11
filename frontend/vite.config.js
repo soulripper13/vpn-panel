@@ -1,9 +1,22 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import fs from 'fs'
+import path from 'path'
+import { fileURLToPath } from 'url'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+let appVersion = '1.0.0'
+try {
+  const verData = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../backend/version.json'), 'utf8'))
+  appVersion = verData.version || appVersion
+} catch {}
 
 export default defineConfig({
   base: './',
   plugins: [react()],
+  define: {
+    __APP_VERSION__: JSON.stringify(appVersion),
+  },
   server: {
     port: 3000,
     proxy: {
