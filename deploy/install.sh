@@ -125,6 +125,10 @@ prompt_user() {
     local prompt_msg="$1"
     local default_val="$2"
     local result=""
+    if [[ "${NON_INTERACTIVE:-0}" == "1" || "${DEBIAN_FRONTEND:-}" == "noninteractive" ]]; then
+        echo "$default_val"
+        return
+    fi
     if [[ -t 0 ]]; then
         read -rp "$(echo -e "$prompt_msg")" result
     elif [[ -r /dev/tty ]]; then
@@ -146,40 +150,50 @@ SUGGESTED_PASS=$(openssl rand -base64 9 2>/dev/null | tr -dc 'a-zA-Z0-9' | head 
 echo -e "\n${BOLD}${CYAN}Please customize your VPN Panel settings (press Enter to accept suggested defaults):${NC}\n"
 
 # 1. Port
-PANEL_PORT=$(prompt_user "${BOLD}1. Web Panel Port${NC} [default: ${YELLOW}2096${NC}]: " "2096")
+PANEL_PORT="${PANEL_PORT:-$(prompt_user "${BOLD}1. Web Panel Port${NC} [default: ${YELLOW}2096${NC}]: " "2096")}"
 
 # 2. Username
-ADMIN_USERNAME=$(prompt_user "${BOLD}2. Admin Username${NC} [default: ${YELLOW}admin${NC}]: " "admin")
+ADMIN_USERNAME="${ADMIN_USERNAME:-$(prompt_user "${BOLD}2. Admin Username${NC} [default: ${YELLOW}admin${NC}]: " "admin")}"
 
 # 3. Password
-ADMIN_PASSWORD=$(prompt_user "${BOLD}3. Admin Password${NC} [default: ${YELLOW}${SUGGESTED_PASS}${NC}]: " "${SUGGESTED_PASS}")
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(prompt_user "${BOLD}3. Admin Password${NC} [default: ${YELLOW}${SUGGESTED_PASS}${NC}]: " "${SUGGESTED_PASS}")}"
 
 # 4. Domain / IP selection
 echo ""
 echo -e "${BOLD}4. Server Host / Domain Configuration:${NC}"
 echo -e "   Detected Public IP: ${GREEN}${DETECTED_IP}${NC}"
-USE_DOMAIN=$(prompt_user "   Do you want to bind a domain name to this server? (y/n) [default: ${YELLOW}n${NC}]: " "n")
 
-SERVER_HOST="${DETECTED_IP}"
 CERT_FULLCHAIN=""
 CERT_PRIVKEY=""
 
-if [[ "${USE_DOMAIN}" =~ ^[Yy]$ ]]; then
-    DOMAIN_INPUT=$(prompt_user "   Enter your domain name (e.g. ${CYAN}vpn.example.com${NC}): " "")
-    if [[ -n "${DOMAIN_INPUT}" ]]; then
-        SERVER_HOST="${DOMAIN_INPUT}"
-        info "Domain set to: ${SERVER_HOST}"
-        # Automatically detect existing Let's Encrypt certificates if present
-        if [[ -f "/etc/letsencrypt/live/${SERVER_HOST}/fullchain.pem" ]]; then
-            CERT_FULLCHAIN="/etc/letsencrypt/live/${SERVER_HOST}/fullchain.pem"
-            CERT_PRIVKEY="/etc/letsencrypt/live/${SERVER_HOST}/privkey.pem"
-            success "Existing Let's Encrypt certificate found for ${SERVER_HOST}."
-        fi
-    else
-        warn "No domain entered. Falling back to server IP: ${DETECTED_IP}"
+if [[ -n "${SERVER_HOST:-}" ]]; then
+    info "Server host pre-configured: ${SERVER_HOST}"
+    if [[ -f "/etc/letsencrypt/live/${SERVER_HOST}/fullchain.pem" ]]; then
+        CERT_FULLCHAIN="/etc/letsencrypt/live/${SERVER_HOST}/fullchain.pem"
+        CERT_PRIVKEY="/etc/letsencrypt/live/${SERVER_HOST}/privkey.pem"
+        success "Existing Let's Encrypt certificate found for ${SERVER_HOST}."
     fi
 else
-    info "Using public IP: ${DETECTED_IP}"
+    USE_DOMAIN=$(prompt_user "   Do you want to bind a domain name to this server? (y/n) [default: ${YELLOW}n${NC}]: " "n")
+    SERVER_HOST="${DETECTED_IP}"
+
+    if [[ "${USE_DOMAIN}" =~ ^[Yy]$ ]]; then
+        DOMAIN_INPUT=$(prompt_user "   Enter your domain name (e.g. ${CYAN}vpn.example.com${NC}): " "")
+        if [[ -n "${DOMAIN_INPUT}" ]]; then
+            SERVER_HOST="${DOMAIN_INPUT}"
+            info "Domain set to: ${SERVER_HOST}"
+            # Automatically detect existing Let's Encrypt certificates if present
+            if [[ -f "/etc/letsencrypt/live/${SERVER_HOST}/fullchain.pem" ]]; then
+                CERT_FULLCHAIN="/etc/letsencrypt/live/${SERVER_HOST}/fullchain.pem"
+                CERT_PRIVKEY="/etc/letsencrypt/live/${SERVER_HOST}/privkey.pem"
+                success "Existing Let's Encrypt certificate found for ${SERVER_HOST}."
+            fi
+        else
+            warn "No domain entered. Falling back to server IP: ${DETECTED_IP}"
+        fi
+    else
+        info "Using public IP: ${DETECTED_IP}"
+    fi
 fi
 
 # 5. Secret Base Path selection
@@ -188,18 +202,25 @@ echo ""
 echo -e "${BOLD}5. Web Secret Base Path Security:${NC}"
 echo -e "   Hides the panel from internet scanners (Shodan, Censys) by requiring a secret URL path."
 echo -e "   Any scanner requesting root ${CYAN}/${NC} will receive 404 Not Found."
-WEB_PATH_CHOICE=$(prompt_user "   Use secret URL path? (y/n) [default: ${YELLOW}n${NC} (root /)]: " "n")
 
-WEB_BASE_PATH="/"
-if [[ "${WEB_PATH_CHOICE}" =~ ^[Yy]$ ]]; then
-    SUGGESTED_TOKEN="/${SUGGESTED_BASE_PATH}"
-    CUSTOM_PATH=$(prompt_user "   Enter secret path [default: ${YELLOW}${SUGGESTED_TOKEN}${NC}]: " "${SUGGESTED_TOKEN}")
-    [[ "${CUSTOM_PATH}" != /* ]] && CUSTOM_PATH="/${CUSTOM_PATH}"
-    CUSTOM_PATH="${CUSTOM_PATH%/}"
-    WEB_BASE_PATH="${CUSTOM_PATH:-/}"
-    info "Web Secret Path set to: ${WEB_BASE_PATH}"
+if [[ -n "${WEB_BASE_PATH:-}" ]]; then
+    [[ "${WEB_BASE_PATH}" != /* ]] && WEB_BASE_PATH="/${WEB_BASE_PATH}"
+    WEB_BASE_PATH="${WEB_BASE_PATH%/}"
+    WEB_BASE_PATH="${WEB_BASE_PATH:-/}"
+    info "Web Secret Path pre-configured: ${WEB_BASE_PATH}"
 else
-    info "Using standard root path: /"
+    WEB_PATH_CHOICE=$(prompt_user "   Use secret URL path? (y/n) [default: ${YELLOW}n${NC} (root /)]: " "n")
+    WEB_BASE_PATH="/"
+    if [[ "${WEB_PATH_CHOICE}" =~ ^[Yy]$ ]]; then
+        SUGGESTED_TOKEN="/${SUGGESTED_BASE_PATH}"
+        CUSTOM_PATH=$(prompt_user "   Enter secret path [default: ${YELLOW}${SUGGESTED_TOKEN}${NC}]: " "${SUGGESTED_TOKEN}")
+        [[ "${CUSTOM_PATH}" != /* ]] && CUSTOM_PATH="/${CUSTOM_PATH}"
+        CUSTOM_PATH="${CUSTOM_PATH%/}"
+        WEB_BASE_PATH="${CUSTOM_PATH:-/}"
+        info "Web Secret Path set to: ${WEB_BASE_PATH}"
+    else
+        info "Using standard root path: /"
+    fi
 fi
 
 echo ""
