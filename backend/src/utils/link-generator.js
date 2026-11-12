@@ -303,6 +303,7 @@ function generateClashProxy(inbound, client, host) {
         password: stlsPassword,
         version,
       },
+      udp: false,
     };
   }
 
@@ -597,6 +598,15 @@ function generateSingboxConfig(inbound, client, host) {
 
     const outbounds = [
       {
+        type: 'shadowsocks',
+        tag: `${remark}-ss`,
+        server: host,
+        server_port: port,
+        method: ssMethod,
+        password: ssPassword,
+        detour: `${remark}-shadowtls`,
+      },
+      {
         type: 'shadowtls',
         tag: `${remark}-shadowtls`,
         server: host,
@@ -611,15 +621,6 @@ function generateSingboxConfig(inbound, client, host) {
             fingerprint: 'chrome',
           },
         },
-        detour: `${remark}-ss`,
-      },
-      {
-        type: 'shadowsocks',
-        tag: `${remark}-ss`,
-        server: host,
-        server_port: port,
-        method: ssMethod,
-        password: ssPassword,
       },
     ];
 

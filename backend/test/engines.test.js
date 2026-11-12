@@ -153,6 +153,38 @@ test('YAML Serialization: Safe escaping and default secure TLS (H4, M2)', () => 
   assert.ok(fullYaml.includes('proxy-groups:'));
 });
 
+test('Shadow-TLS: Clash proxy has udp: false and sing-box client has correct detour order', () => {
+  const { generateSingboxConfig } = require('../src/utils/link-generator');
+  const inbound = {
+    type: 'shadowtls',
+    protocol: 'shadowtls',
+    port: 443,
+    settings: {
+      serverName: 'download.nvidia.com',
+      ssPassword: 'test-ss-password',
+      shadowtlsPassword: 'test-stls-password',
+      ssMethod: '2022-blake3-aes-128-gcm',
+    },
+  };
+  const client = {
+    password: 'test-stls-password',
+    remark: 'StlsClient',
+  };
+
+  const clashProxy = generateClashProxy(inbound, client, 'example.com');
+  assert.ok(clashProxy);
+  assert.equal(clashProxy.obj.udp, false, 'Shadow-TLS Clash proxy must set udp: false to prevent DNS/UDP stalls');
+
+  const singboxRaw = generateSingboxConfig(inbound, client, 'example.com');
+  const singboxConfig = JSON.parse(singboxRaw);
+  assert.ok(Array.isArray(singboxConfig.outbounds));
+  const ssOut = singboxConfig.outbounds.find((o) => o.type === 'shadowsocks');
+  const stlsOut = singboxConfig.outbounds.find((o) => o.type === 'shadowtls');
+  assert.ok(ssOut && stlsOut);
+  assert.equal(ssOut.detour, stlsOut.tag, 'Shadowsocks client outbound must detour to shadowtls');
+  assert.equal(stlsOut.detour, undefined, 'Shadowtls client outbound must NOT detour back to shadowsocks');
+});
+
 test.after(() => {
   try { fs.unlinkSync(testDbPath); } catch {}
   try { fs.unlinkSync(`${testDbPath}-wal`); } catch {}

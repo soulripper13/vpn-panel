@@ -11,6 +11,7 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');
 const Joi = require('joi');
+const cfg = require('../config/app-config');
 const Inbound = require('../models/Inbound');
 const Client = require('../models/Client');
 const Settings = require('../models/Settings');
@@ -140,6 +141,33 @@ function getInboundAndClient(inboundId, clientId) {
   return { inbound: inb, client: c };
 }
 
+function findPortConflict(targetPort, targetType, targetProtocol = '', excludeId = null) {
+  const normType = (targetType || targetProtocol || '').toLowerCase();
+  const isUdp = ['hysteria', 'hysteria2', 'tuic', 'wireguard'].includes(normType);
+  const isTcp = ['vless', 'vmess', 'trojan', 'shadowtls', 'socks', 'http'].includes(normType);
+
+  const all = Inbound.findAll();
+  for (const item of all) {
+    if (excludeId && item.id === excludeId) continue;
+    if (parseInt(item.port, 10) === parseInt(targetPort, 10)) {
+      const itemType = (item.type || item.protocol || '').toLowerCase();
+      const itemIsUdp = ['hysteria', 'hysteria2', 'tuic', 'wireguard'].includes(itemType);
+      const itemIsTcp = ['vless', 'vmess', 'trojan', 'shadowtls', 'socks', 'http'].includes(itemType);
+
+      // Conflict if both are TCP, both are UDP, or either handles both/unspecified
+      const conflict = (isTcp && itemIsTcp) ||
+                       (isUdp && itemIsUdp) ||
+                       (!isTcp && !isUdp) ||
+                       (!itemIsTcp && !itemIsUdp);
+
+      if (conflict) {
+        return item;
+      }
+    }
+  }
+  return null;
+}
+
 /**
  * Apply configuration to the respective engine with error capture
  */
@@ -258,9 +286,21 @@ router.post('/', validateBody(createInboundSchema), async (req, res) => {
 
     const finalTag = tag && tag.trim() ? tag.trim() : `${engine}-${type}-${port}`;
 
+    if (parseInt(port, 10) === parseInt(cfg.PANEL_PORT || 2096, 10)) {
+      return res.status(400).json({ success: false, message: `Port ${port} is reserved for the VPN Panel web interface` });
+    }
+
     const existing = Inbound.findByTag(finalTag);
     if (existing) {
       return res.status(400).json({ success: false, message: `Tag "${finalTag}" is already in use` });
+    }
+
+    const portConflict = findPortConflict(port, type, protocol);
+    if (portConflict) {
+      return res.status(400).json({
+        success: false,
+        message: `Port ${port} is already in use by inbound "${portConflict.tag}" (${portConflict.engine} / ${portConflict.type}). Each inbound must have a unique port.`,
+      });
     }
 
     const { id: inboundId } = Inbound.create({
@@ -365,6 +405,26 @@ router.put('/:id', validateBody(updateInboundSchema), async (req, res) => {
     }
 
     const updatePayload = { ...req.body };
+
+    const targetPort = updatePayload.port !== undefined ? updatePayload.port : existing.port;
+    if (updatePayload.port !== undefined && parseInt(targetPort, 10) === parseInt(cfg.PANEL_PORT || 2096, 10)) {
+      return res.status(400).json({ success: false, message: `Port ${targetPort} is reserved for the VPN Panel web interface` });
+    }
+
+    if (updatePayload.port !== undefined) {
+      const portConflict = findPortConflict(
+        updatePayload.port,
+        updatePayload.type || existing.type,
+        updatePayload.protocol || existing.protocol,
+        id
+      );
+      if (portConflict) {
+        return res.status(400).json({
+          success: false,
+          message: `Port ${updatePayload.port} is already in use by inbound "${portConflict.tag}" (${portConflict.engine} / ${portConflict.type}). Each inbound must have a unique port.`,
+        });
+      }
+    }
     if (updatePayload.settings && typeof updatePayload.settings !== 'string') {
       updatePayload.settings_json = JSON.stringify(updatePayload.settings);
       delete updatePayload.settings;
