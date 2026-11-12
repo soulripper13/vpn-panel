@@ -6,9 +6,30 @@
 
 'use strict';
 
+const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');
 const cfg = require('../config/app-config');
+
+function resolveCertFile(candidate) {
+  if (candidate && typeof candidate === 'string' && fs.existsSync(candidate)) {
+    try {
+      fs.accessSync(candidate, fs.constants.R_OK);
+      return candidate;
+    } catch {}
+  }
+  return cfg.CERT_FULLCHAIN || '';
+}
+
+function resolveKeyFile(candidate) {
+  if (candidate && typeof candidate === 'string' && fs.existsSync(candidate)) {
+    try {
+      fs.accessSync(candidate, fs.constants.R_OK);
+      return candidate;
+    } catch {}
+  }
+  return cfg.CERT_PRIVKEY || '';
+}
 
 /**
  * Generate a sing-box inbound JSON object
@@ -85,8 +106,8 @@ function generateSingboxInbound(type, opts = {}) {
                 },
               }
             : {
-                certificate_path: cfg.CERT_FULLCHAIN,
-                key_path: cfg.CERT_PRIVKEY,
+                certificate_path: resolveCertFile(opts.certificate_path || opts.certificateFile),
+                key_path: resolveKeyFile(opts.key_path || opts.keyFile),
               }),
         },
       }
@@ -152,6 +173,7 @@ function generateSingboxInbound(type, opts = {}) {
         listen: '127.0.0.1',
         method: ssMethod,
         password: ssKey,
+        ...muxBlock,
       };
 
       return [stlsInbound, ssInbound];
@@ -339,11 +361,16 @@ function generateXrayInbound(type, opts = {}) {
 
     if (security === 'tls') {
       ss.security = 'tls';
+      const rawCert = rawStreamSettings.tlsSettings?.certificates?.[0]?.certificateFile;
+      const rawKey = rawStreamSettings.tlsSettings?.certificates?.[0]?.keyFile;
       ss.tlsSettings = {
         serverName: serverName || '',
         alpn: Array.isArray(alpn) ? alpn : ['h2', 'http/1.1'],
         certificates: [
-          { certificateFile: cfg.CERT_FULLCHAIN, keyFile: cfg.CERT_PRIVKEY },
+          {
+            certificateFile: resolveCertFile(opts.certificateFile || rawCert),
+            keyFile: resolveKeyFile(opts.keyFile || rawKey),
+          },
         ],
       };
     } else if (security === 'reality') {
@@ -498,22 +525,28 @@ function generateXrayInbound(type, opts = {}) {
             },
           };
         }
-        if (!hy2StreamSettings.tlsSettings?.certificates || hy2StreamSettings.tlsSettings.certificates.length === 0) {
+        if (hy2StreamSettings.tlsSettings?.certificates && hy2StreamSettings.tlsSettings.certificates.length > 0) {
+          hy2StreamSettings.tlsSettings.certificates = hy2StreamSettings.tlsSettings.certificates.map((c) => ({
+            ...c,
+            certificateFile: resolveCertFile(c.certificateFile),
+            keyFile: resolveKeyFile(c.keyFile),
+          }));
+        } else {
           hy2StreamSettings.tlsSettings = {
             ...(hy2StreamSettings.tlsSettings || {}),
             alpn: ['h3', 'h2', 'http/1.1'],
             serverName: serverName || opts.sni || opts.listen || '',
             certificates: [
               {
-                certificateFile: opts.certificateFile || rawStreamSettings.certificateFile || cfg.CERT_FULLCHAIN,
-                keyFile: opts.keyFile || rawStreamSettings.keyFile || cfg.CERT_PRIVKEY,
+                certificateFile: resolveCertFile(opts.certificateFile || rawStreamSettings.certificateFile),
+                keyFile: resolveKeyFile(opts.keyFile || rawStreamSettings.keyFile),
               },
             ],
           };
         }
       } else {
-        const certFile = opts.certificateFile || cfg.CERT_FULLCHAIN;
-        const keyFile = opts.keyFile || cfg.CERT_PRIVKEY;
+        const certFile = resolveCertFile(opts.certificateFile);
+        const keyFile = resolveKeyFile(opts.keyFile);
         const sniName = serverName || opts.sni || opts.listen || '';
 
         hy2StreamSettings = {

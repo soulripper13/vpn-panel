@@ -129,13 +129,18 @@ async function writeEngineConfig(payload) {
   const content = `${JSON.stringify(payload.config, null, 2)}\n`;
   if (Buffer.byteLength(content) > 4 * 1024 * 1024) throw new Error('Engine config is too large');
   fs.mkdirSync(path.dirname(engine.config), { recursive: true, mode: 0o750 });
-  const tempPath = `${engine.config}.vpn-panel-${process.pid}-${crypto.randomBytes(6).toString('hex')}.tmp`;
+  const tempPath = `${engine.config}.vpn-panel-${process.pid}-${crypto.randomBytes(6).toString('hex')}.tmp.json`;
   try {
     fs.writeFileSync(tempPath, content, { mode: 0o600 });
-    if (payload.engine === 'singbox') {
-      await execFileAsync(engine.binary, ['check', '-c', tempPath], { timeout: 30000 });
-    } else {
-      await execFileAsync(engine.binary, ['-test', '-format', 'json', '-config', tempPath], { timeout: 30000 });
+    try {
+      if (payload.engine === 'singbox') {
+        await execFileAsync(engine.binary, ['check', '-c', tempPath], { timeout: 30000 });
+      } else {
+        await execFileAsync(engine.binary, ['-test', '-format', 'json', '-config', tempPath], { timeout: 30000 });
+      }
+    } catch (testErr) {
+      const detail = (testErr.stderr || testErr.stdout || testErr.message || '').trim();
+      throw new Error(`${payload.engine} configuration test failed: ${detail}`);
     }
     fs.renameSync(tempPath, engine.config);
     fs.chownSync(engine.config, 0, Number(process.env.PRIVILEGED_GROUP_GID || process.getgid()));

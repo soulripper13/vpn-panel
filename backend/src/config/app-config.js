@@ -86,12 +86,14 @@ const XRAY_PROCESS_NAME = 'xray';
 function detectCert(type) {
   if (type === 'fullchain') {
     if (process.env.CERT_FULLCHAIN) return process.env.CERT_FULLCHAIN;
+    if (fs.existsSync('/etc/vpn-panel/tls/fullchain.pem')) return '/etc/vpn-panel/tls/fullchain.pem';
     if (fs.existsSync('/root/cert/ip/fullchain.pem')) return '/root/cert/ip/fullchain.pem';
     if (fs.existsSync('/etc/ssl/certs/ssl-cert-snakeoil.pem')) return '/etc/ssl/certs/ssl-cert-snakeoil.pem';
     return '';
   }
   if (type === 'privkey') {
     if (process.env.CERT_PRIVKEY) return process.env.CERT_PRIVKEY;
+    if (fs.existsSync('/etc/vpn-panel/tls/privkey.pem')) return '/etc/vpn-panel/tls/privkey.pem';
     if (fs.existsSync('/root/cert/ip/privkey.pem')) return '/root/cert/ip/privkey.pem';
     if (fs.existsSync('/etc/ssl/private/ssl-cert-snakeoil.key')) return '/etc/ssl/private/ssl-cert-snakeoil.key';
     return '';

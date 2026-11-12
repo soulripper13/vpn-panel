@@ -19,7 +19,7 @@ Restart=on-failure
 RestartSec=2s
 NoNewPrivileges=false
 PrivateTmp=true
-ProtectHome=true
+ProtectHome=read-only
 ProtectSystem=strict
 ReadWritePaths=/run/vpn-panel /opt/vpn-panel /etc/sing-box /etc/xray /usr/local/bin /usr/local/share/xray /usr/local/x-ui/bin
 

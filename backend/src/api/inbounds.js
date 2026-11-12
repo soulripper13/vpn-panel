@@ -413,7 +413,13 @@ router.delete('/:id', async (req, res) => {
     }
 
     Inbound.delete(id);
-    await applyEngineConfig(existing.engine);
+    let engineWarning = null;
+    try {
+      await applyEngineConfig(existing.engine);
+    } catch (applyErr) {
+      engineWarning = applyErr.message;
+      console.error(`[Inbound Delete] Failed to reload ${existing.engine} after deleting inbound ${id}:`, applyErr.message);
+    }
 
     logAudit({
       userId: req.session.user.id,
@@ -421,13 +427,16 @@ router.delete('/:id', async (req, res) => {
       ip: req.ip || '127.0.0.1',
       action: 'delete_inbound',
       target: `inbound:${id}`,
-      details: { tag: existing.tag, port: existing.port },
-      status: 'success',
+      details: { tag: existing.tag, port: existing.port, warning: engineWarning },
+      status: engineWarning ? 'warning' : 'success',
     });
 
     return res.json({
       success: true,
-      message: 'Inbound deleted successfully',
+      message: engineWarning
+        ? `Inbound deleted from database, but engine reload warning: ${engineWarning}`
+        : 'Inbound deleted successfully',
+      warning: engineWarning,
     });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
