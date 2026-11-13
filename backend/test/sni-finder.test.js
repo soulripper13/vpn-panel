@@ -9,6 +9,8 @@ const {
   testSingleSni,
   runBatchBenchmark,
 } = require('../src/services/sni-tester');
+const { extractDomainsFromHtml, filterResolvingDomains } = require('../src/services/sni-scourer');
+const SavedSni = require('../src/models/SavedSni');
 
 test('SNI Tester: Curated candidates exist and have required properties', () => {
   assert.ok(Array.isArray(CANDIDATE_SNIS));
@@ -72,3 +74,59 @@ test('SNI Tester: runBatchBenchmark processes list and returns sorted array', as
   assert.ok(typeof results[0].score === 'number');
   assert.ok(typeof results[1].score === 'number');
 });
+
+test('SNI Scourer: extractDomainsFromHtml extracts valid hostnames and excludes metadata/locals', () => {
+  const sampleHtml = `
+    <html>
+      <head>
+        <link rel="stylesheet" href="https://cdn.example.org/style.css">
+        <script src="https://assets.sub.domain.com/app.js"></script>
+        <a href="https://www.w3.org/TR/html5">W3C</a>
+        <a href="http://127.0.0.1:8080/test">Local IP</a>
+        <a href="https://internal.local/api">Internal</a>
+        <img src="https://media.validtarget.net/logo.png">
+      </head>
+    </html>
+  `;
+  const domains = extractDomainsFromHtml(sampleHtml, 'cdn.example.org');
+  assert.ok(domains.includes('assets.sub.domain.com'));
+  assert.ok(domains.includes('media.validtarget.net'));
+  assert.equal(domains.includes('cdn.example.org'), false); // base host excluded
+  assert.equal(domains.includes('www.w3.org'), false); // w3 excluded
+  assert.equal(domains.includes('127.0.0.1'), false); // local excluded
+  assert.equal(domains.includes('internal.local'), false); // .local excluded
+});
+
+test('SNI Scourer: SavedSni model persists, retrieves, and deletes bookmarks', () => {
+  const testDomain = `scouted-gem-${Date.now()}.example.com`;
+  const saved = SavedSni.upsert({
+    domain: testDomain,
+    port: 443,
+    score: 95,
+    rating: 'IDEAL',
+    tlsProtocol: 'TLSv1.3',
+    alpn: 'h2',
+    matchesSan: true,
+    latencyMs: 45,
+    source: 'web_scourer',
+    region: 'RU',
+    notes: 'Discovered via web scourer',
+  });
+
+  assert.ok(saved.id > 0);
+  assert.equal(saved.domain, testDomain);
+  assert.equal(saved.score, 95);
+  assert.equal(saved.rating, 'IDEAL');
+
+  const found = SavedSni.findByDomain(testDomain);
+  assert.ok(found);
+  assert.equal(found.id, saved.id);
+
+  const all = SavedSni.getAll('RU');
+  assert.ok(all.some((s) => s.domain === testDomain));
+
+  const deleted = SavedSni.delete(saved.id);
+  assert.equal(deleted, true);
+  assert.equal(SavedSni.findByDomain(testDomain), undefined);
+});
+

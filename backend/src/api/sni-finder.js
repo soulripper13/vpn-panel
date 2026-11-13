@@ -9,6 +9,7 @@ const express = require('express');
 const router = express.Router();
 const Joi = require('joi');
 const Settings = require('../models/Settings');
+const SavedSni = require('../models/SavedSni');
 const { requireAuth } = require('../middleware/auth');
 const { validateBody } = require('../middleware/validate');
 const {
@@ -19,6 +20,7 @@ const {
   getCandidates,
   runBatchBenchmark,
 } = require('../services/sni-tester');
+const { scourAndBenchmark } = require('../services/sni-scourer');
 
 // Require authentication for all SNI finder routes
 router.use(requireAuth);
@@ -155,6 +157,103 @@ router.post('/test-custom', validateBody(testCustomSchema), async (req, res) => 
     return res.json({
       success: true,
       data: result,
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/**
+ * POST /api/sni-finder/scour
+ * Autonomously scours the live web, crawls regional seed hubs, or hunts subdomains
+ */
+const scourSchema = Joi.object({
+  mode: Joi.string().valid('regional', 'subdomains', 'crawl_url').default('regional'),
+  target: Joi.string().max(255).allow('').default(''),
+  region: Joi.string().valid('AUTO', 'RU', 'IR', 'CN', 'GLOBAL', 'ALL').default('GLOBAL'),
+  limit: Joi.number().integer().min(1).max(50).default(15),
+  concurrency: Joi.number().integer().min(1).max(8).default(4),
+});
+
+router.post('/scour', validateBody(scourSchema), async (req, res) => {
+  try {
+    const { mode, target, region, limit, concurrency } = req.body;
+    const data = await scourAndBenchmark({
+      mode,
+      target,
+      region: region === 'AUTO' ? 'GLOBAL' : region,
+      limit,
+      concurrency,
+    });
+
+    return res.json({
+      success: true,
+      data,
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/**
+ * GET /api/sni-finder/saved
+ * Returns saved/bookmarked SNIs from the database
+ */
+router.get('/saved', (req, res) => {
+  try {
+    const items = SavedSni.getAll(req.query.region);
+    return res.json({
+      success: true,
+      data: items,
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/**
+ * POST /api/sni-finder/saved
+ * Bookmarks an SNI candidate
+ */
+const saveSniSchema = Joi.object({
+  domain: Joi.string().regex(DOMAIN_REGEX).required(),
+  port: Joi.number().integer().min(1).max(65535).default(443),
+  score: Joi.number().integer().min(0).max(100).default(0),
+  rating: Joi.string().valid('IDEAL', 'EXCELLENT', 'COMPATIBLE', 'INCOMPATIBLE').default('IDEAL'),
+  tlsProtocol: Joi.string().max(30).allow('').optional(),
+  alpn: Joi.string().max(50).allow('').optional(),
+  matchesSan: Joi.boolean().default(true),
+  latencyMs: Joi.number().integer().min(0).default(0),
+  source: Joi.string().max(50).default('web_scourer'),
+  region: Joi.string().max(20).default('GLOBAL'),
+  notes: Joi.string().max(500).allow('').optional(),
+});
+
+router.post('/saved', validateBody(saveSniSchema), (req, res) => {
+  try {
+    const saved = SavedSni.upsert(req.body);
+    return res.json({
+      success: true,
+      data: saved,
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+/**
+ * DELETE /api/sni-finder/saved/:id
+ * Removes a saved SNI from the library
+ */
+router.delete('/saved/:id', (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!id) return res.status(400).json({ success: false, message: 'Invalid ID' });
+
+    const deleted = SavedSni.delete(id);
+    return res.json({
+      success: true,
+      data: { deleted },
     });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });

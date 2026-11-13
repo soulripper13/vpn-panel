@@ -121,6 +121,23 @@ db.exec(`
     created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
   );
 
+  -- Saved SNI library for anti-censorship camouflage
+  CREATE TABLE IF NOT EXISTS saved_snis (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    domain       TEXT    NOT NULL UNIQUE,
+    port         INTEGER NOT NULL DEFAULT 443,
+    score        INTEGER NOT NULL DEFAULT 0,
+    rating       TEXT    NOT NULL DEFAULT 'IDEAL',
+    tls_protocol TEXT    NOT NULL DEFAULT '',
+    alpn         TEXT    NOT NULL DEFAULT '',
+    matches_san  INTEGER NOT NULL DEFAULT 1,
+    latency_ms   INTEGER NOT NULL DEFAULT 0,
+    source       TEXT    NOT NULL DEFAULT 'web_scourer',
+    region       TEXT    NOT NULL DEFAULT 'GLOBAL',
+    notes        TEXT    NOT NULL DEFAULT '',
+    created_at   INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+  );
+
   -- Indexes
   CREATE INDEX IF NOT EXISTS idx_clients_inbound   ON clients(inbound_id);
   CREATE INDEX IF NOT EXISTS idx_traffic_inbound   ON traffic_logs(inbound_id);
@@ -128,6 +145,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_traffic_logged_at ON traffic_logs(logged_at);
   CREATE INDEX IF NOT EXISTS idx_sessions_expired  ON sessions(expired_at);
   CREATE INDEX IF NOT EXISTS idx_audit_created     ON audit_logs(created_at);
+  CREATE INDEX IF NOT EXISTS idx_saved_snis_score  ON saved_snis(score DESC);
 `);
 
 // ─── Migrations for existing databases ────────────────────────────────────────
