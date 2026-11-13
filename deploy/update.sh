@@ -45,6 +45,14 @@ fi
 
 [[ -d "${PANEL_DIR}" ]] || die "Panel not installed at ${PANEL_DIR}. Run install.sh first."
 
+# Prevent bash self-overwrite when updater copies over itself
+if [[ "${BASH_SOURCE[0]:-$0}" == *"/opt/vpn-panel/"* ]]; then
+    RUNNER_COPY="/tmp/vpn-panel-update-runner-$$.sh"
+    cp -f "${BASH_SOURCE[0]:-$0}" "${RUNNER_COPY}"
+    chmod +x "${RUNNER_COPY}"
+    exec bash "${RUNNER_COPY}" "$@"
+fi
+
 # Ensure vpn-panel service account and staging directories exist for isolated helper mode
 if ! id -u vpn-panel >/dev/null 2>&1; then
     info "Setting up vpn-panel service account..."
@@ -119,6 +127,7 @@ if [[ -d "${SOURCE_DIR}/backend" ]]; then
     fi
     if [[ -f "${SOURCE_DIR}/VERSION" ]]; then
         cp -f "${SOURCE_DIR}/VERSION" "${PANEL_DIR}/VERSION" 2>/dev/null || true
+        cp -f "${SOURCE_DIR}/VERSION" "${BACKEND_DIR}/VERSION" 2>/dev/null || true
     fi
     success "Backend files updated."
 else

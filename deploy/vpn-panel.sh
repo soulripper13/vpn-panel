@@ -203,7 +203,9 @@ update_panel() {
     else
         echo -e "${RED}[ERROR] update.sh not found at ${PANEL_DIR}/deploy/update.sh${NC}"
     fi
-    read -rp "Press Enter to return to menu..."
+    if [[ -t 0 ]]; then
+        read -rp "Press Enter to return to menu..."
+    fi
 }
 
 reset_admin() {
@@ -501,6 +503,7 @@ case "${1:-}" in
     log|logs)    journalctl -u "${SERVICE_NAME}" -f ;;
     update)      check_root; update_panel ;;
     url)         get_access_url ;;
+    version|-v|--version) get_panel_version ;;
     "")          main_menu ;;
     *)           main_menu ;;
 esac
