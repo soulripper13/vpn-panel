@@ -10,7 +10,7 @@ export const getBasePath = () => {
   const segments = (window.location.pathname || '').split('/').filter(Boolean)
   if (segments.length > 0) {
     const first = segments[0]
-    const knownRoutes = ['login', 'dashboard', 'inbounds', 'clients', 'settings', 'logs', 'sub', 'assets', 'api', 'ws']
+    const knownRoutes = ['login', 'dashboard', 'inbounds', 'clients', 'settings', 'logs', 'sni-finder', 'sub', 'assets', 'api', 'ws']
     if (!knownRoutes.includes(first)) {
       const detected = `/${first}`
       window.__BASE_PATH__ = detected

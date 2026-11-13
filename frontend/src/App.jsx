@@ -10,6 +10,7 @@ const Inbounds = lazy(() => import('./pages/Inbounds'))
 const Clients = lazy(() => import('./pages/Clients'))
 const Settings = lazy(() => import('./pages/Settings'))
 const Logs = lazy(() => import('./pages/Logs'))
+const SniFinder = lazy(() => import('./pages/SniFinder'))
 
 function PageLoading() {
   return (
@@ -57,6 +58,7 @@ export default function App() {
           <Route path="dashboard" element={<Suspense fallback={<PageLoading />}><Dashboard /></Suspense>} />
           <Route path="inbounds" element={<Suspense fallback={<PageLoading />}><Inbounds /></Suspense>} />
           <Route path="clients" element={<Suspense fallback={<PageLoading />}><Clients /></Suspense>} />
+          <Route path="sni-finder" element={<Suspense fallback={<PageLoading />}><SniFinder /></Suspense>} />
           <Route path="settings" element={<Suspense fallback={<PageLoading />}><Settings /></Suspense>} />
           <Route path="logs" element={<Suspense fallback={<PageLoading />}><Logs /></Suspense>} />
         </Route>

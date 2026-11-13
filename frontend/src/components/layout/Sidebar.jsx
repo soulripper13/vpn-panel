@@ -8,6 +8,7 @@ import {
   Settings,
   Shield,
   Layers,
+  Radar,
 } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -15,6 +16,7 @@ const navItems = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/inbounds', label: 'Inbounds', icon: Radio },
   { to: '/clients', label: 'Clients', icon: Users },
+  { to: '/sni-finder', label: 'SNI Finder', icon: Radar },
   { to: '/logs', label: 'Logs', icon: ScrollText },
   { to: '/settings', label: 'Settings', icon: Settings },
 ]

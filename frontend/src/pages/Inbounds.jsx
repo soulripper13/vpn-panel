@@ -1,4 +1,5 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
+import { useLocation } from 'react-router-dom'
 import {
   Plus,
   Search,
@@ -23,12 +24,23 @@ import QRModal from '../components/modals/QRModal'
 import { formatBytes } from '../utils/format'
 
 export default function Inbounds() {
+  const location = useLocation()
   const [engineFilter, setEngineFilter] = useState('all')
   const [search, setSearch] = useState('')
   const [isAddOpen, setIsAddOpen] = useState(false)
+  const [prefillSni, setPrefillSni] = useState(null)
+  const [prefillDest, setPrefillDest] = useState(null)
   const [editingInbound, setEditingInbound] = useState(null)
   const [clientModalInbound, setClientModalInbound] = useState(null)
   const [qrModalData, setQrModalData] = useState(null)
+
+  useEffect(() => {
+    if (location.state?.prefillSni) {
+      setPrefillSni(location.state.prefillSni)
+      setPrefillDest(location.state.prefillDest || `${location.state.prefillSni}:443`)
+      setIsAddOpen(true)
+    }
+  }, [location.state])
 
   const {
     inbounds,
@@ -268,7 +280,13 @@ export default function Inbounds() {
       {/* Add Modal */}
       <AddInboundModal
         isOpen={isAddOpen}
-        onClose={() => setIsAddOpen(false)}
+        prefillSni={prefillSni}
+        prefillDest={prefillDest}
+        onClose={() => {
+          setIsAddOpen(false)
+          setPrefillSni(null)
+          setPrefillDest(null)
+        }}
         onSuccess={(created) => {
           refetch()
           const initialClient = created?.initialClient

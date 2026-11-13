@@ -37,6 +37,7 @@ const inboundsRouter = require('./api/inbounds');
 const engineRouter = require('./api/engine');
 const statsRouter = require('./api/stats');
 const settingsRouter = require('./api/settings');
+const sniFinderRouter = require('./api/sni-finder');
 
 const app = express();
 
@@ -284,6 +285,7 @@ app.use('/api/inbounds', inboundsRouter);
 app.use('/api/engine', engineRouter);
 app.use('/api/stats', statsRouter);
 app.use('/api/settings', settingsRouter);
+app.use('/api/sni-finder', sniFinderRouter);
 
 // Health check
 app.get('/api/health', (req, res) => {

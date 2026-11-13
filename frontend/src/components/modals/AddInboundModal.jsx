@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import {
   X,
   Check,
@@ -15,6 +16,7 @@ import {
   User,
   Hash,
   Globe,
+  Radar,
 } from 'lucide-react'
 import { generateUUID, generatePassword, generateHexPassword, generateBase64Key } from '../../utils/links'
 import api from '../../utils/api'
@@ -62,7 +64,7 @@ const realityTargetSniPresets = [
   { sni: 'www.yahoo.com', dest: 'www.yahoo.com:443', label: 'Yahoo' },
 ]
 
-export default function AddInboundModal({ isOpen, onClose, onSuccess }) {
+export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni, prefillDest }) {
   const [step, setStep] = useState(1)
   const [engine, setEngine] = useState('singbox')
   const [selectedProtocol, setSelectedProtocol] = useState('shadowtls')
@@ -128,8 +130,16 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess }) {
           if (res.data.data.cert_privkey) setKeyFile(res.data.data.cert_privkey)
         }
       }).catch(() => {})
+
+      if (prefillSni) {
+        setServerName(prefillSni)
+        setDest(prefillDest || `${prefillSni}:443`)
+        setSecurity('reality')
+        setSelectedProtocol('vless')
+        setEngine('singbox')
+      }
     }
-  }, [isOpen])
+  }, [isOpen, prefillSni, prefillDest])
 
   if (!isOpen) return null
 
@@ -550,7 +560,17 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess }) {
                   <div className="space-y-3 pt-2">
                     {/* SNI Presets */}
                     <div>
-                      <span className="text-[11px] text-slate-400 block mb-1">Reality Target Presets:</span>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[11px] text-slate-400">Reality Target Presets:</span>
+                        <Link
+                          to="/sni-finder"
+                          target="_blank"
+                          className="text-[11px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-medium transition"
+                        >
+                          <Radar className="w-3 h-3" />
+                          <span>⚡ Ideal SNI Finder Tool</span>
+                        </Link>
+                      </div>
                       <div className="flex flex-wrap gap-1.5">
                         {realityTargetSniPresets.map((p) => (
                           <button
@@ -759,7 +779,17 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess }) {
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label className="text-xs text-slate-400 block mb-1">Handshake SNI / Server</label>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-xs text-slate-400">Handshake SNI / Server</label>
+                        <Link
+                          to="/sni-finder"
+                          target="_blank"
+                          className="text-[10px] text-purple-400 hover:text-purple-300 flex items-center gap-1 font-medium transition"
+                        >
+                          <Radar className="w-2.5 h-2.5" />
+                          <span>⚡ Find Ideal SNI</span>
+                        </Link>
+                      </div>
                       <input
                         type="text"
                         value={serverName}

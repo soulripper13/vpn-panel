@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import {
   X,
   Check,
@@ -11,6 +12,7 @@ import {
   Lock,
   Globe,
   Radio,
+  Radar,
 } from 'lucide-react'
 import {
   generateUUID,
@@ -442,7 +444,17 @@ export default function EditInboundModal({ isOpen, onClose, inbound, onSuccess }
                 <div className="space-y-3 pt-2 border-t border-[#2d3148]">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label className="text-xs text-slate-400 block mb-1">Reality Target SNI</label>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-xs text-slate-400">Reality Target SNI</label>
+                        <Link
+                          to="/sni-finder"
+                          target="_blank"
+                          className="text-[10px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-medium transition"
+                        >
+                          <Radar className="w-2.5 h-2.5" />
+                          <span>⚡ Ideal SNI Finder</span>
+                        </Link>
+                      </div>
                       <input
                         type="text"
                         required
