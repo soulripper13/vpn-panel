@@ -264,26 +264,17 @@ class PanelUpdaterService {
    * Get current panel version
    */
   static getCurrentVersion() {
-    let version = 'unknown';
+    let version = cfg.VERSION || 'unknown';
     let commit = '';
     let shortCommit = '';
     let buildDate = new Date().toISOString().split('T')[0];
 
-    // Read package.json
-    try {
-      const pkgPath = path.join(__dirname, '../../package.json');
-      if (fs.existsSync(pkgPath)) {
-        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-        if (pkg.version) version = pkg.version;
-      }
-    } catch {}
-
-    // Read version.json
+    // Read version.json for commit / buildDate metadata
     try {
       const verPath = path.join(__dirname, '../../version.json');
       if (fs.existsSync(verPath)) {
         const ver = JSON.parse(fs.readFileSync(verPath, 'utf8'));
-        if (ver.version) version = ver.version;
+        if (ver.version && (!version || version === 'unknown')) version = ver.version;
         if (ver.commit) {
           commit = ver.commit;
           shortCommit = ver.commit.substring(0, 7);
@@ -658,6 +649,9 @@ class PanelUpdaterService {
         ['public', stagedRootPublic],
         ['deploy/panel-update-watchdog.js', watchdogSource],
       ];
+      if (fs.existsSync(path.join(sourceDir, 'VERSION'))) {
+        replacements.push(['VERSION', path.join(sourceDir, 'VERSION')]);
+      }
       transaction = {
         updateId,
         startedAt: updateState.startedAt,

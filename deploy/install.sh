@@ -465,6 +465,9 @@ if [[ ! -d "${SOURCE_DIR}/backend" ]]; then
 fi
 
 # Backend
+if [[ -f "${SOURCE_DIR}/VERSION" ]]; then
+    cp -f "${SOURCE_DIR}/VERSION" "${PANEL_DIR}/VERSION" 2>/dev/null || true
+fi
 if [[ -d "${SOURCE_DIR}/backend" ]]; then
     info "Copying backend..."
     rsync -a --delete "${SOURCE_DIR}/backend/" "${BACKEND_DIR}/"

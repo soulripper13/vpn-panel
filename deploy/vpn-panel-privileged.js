@@ -219,6 +219,9 @@ function panelTargets(stagingRoot) {
     ['public', stagedRootPublic],
     ['deploy/panel-update-watchdog.js', path.join(stagingRoot, 'deploy/panel-update-watchdog.js')],
   ];
+  if (fs.existsSync(path.join(stagingRoot, 'VERSION'))) {
+    targets.push(['VERSION', path.join(stagingRoot, 'VERSION')]);
+  }
   if (fs.existsSync(path.join(stagingRoot, 'backend/node_modules'))) {
     targets.splice(4, 0, ['backend/node_modules', path.join(stagingRoot, 'backend/node_modules')]);
   }
@@ -281,7 +284,21 @@ async function promotePanel(payload) {
   if (roots.length !== 1 || !roots[0].startsWith('vpn-panel-')) throw new Error('Signed release archive layout is invalid');
   const stagingRoot = path.join(extractedRoot, roots[0]);
   rejectSymlinks(stagingRoot);
-  if (JSON.parse(fs.readFileSync(path.join(stagingRoot, 'backend/package.json'), 'utf8')).version !== version) {
+  const metadataVersion = (() => {
+    try {
+      const vFile = path.join(stagingRoot, 'VERSION');
+      if (fs.existsSync(vFile)) return fs.readFileSync(vFile, 'utf8').trim().split('\n')[0].trim();
+    } catch {}
+    try {
+      const vJson = path.join(stagingRoot, 'backend/version.json');
+      if (fs.existsSync(vJson)) return JSON.parse(fs.readFileSync(vJson, 'utf8')).version;
+    } catch {}
+    try {
+      return JSON.parse(fs.readFileSync(path.join(stagingRoot, 'backend/package.json'), 'utf8')).version;
+    } catch {}
+    return '';
+  })();
+  if (metadataVersion && metadataVersion !== version) {
     throw new Error('Signed release version does not match its package metadata');
   }
   const watchdogSource = path.join(stagingRoot, 'deploy/panel-update-watchdog.js');

@@ -1,0 +1,11 @@
+{
+  "name": "vpn-panel-root",
+  "private": true,
+  "description": "VPN Panel - Unified sing-box & xray management panel",
+  "scripts": {
+    "version": "node scripts/set-version.js",
+    "sync-version": "node scripts/sync-version.js",
+    "test": "cd backend && npm test",
+    "build": "cd frontend && npm run build && cp -r dist/* ../backend/public/"
+  }
+}

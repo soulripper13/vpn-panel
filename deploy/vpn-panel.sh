@@ -90,7 +90,11 @@ set_db_setting() {
 }
 
 get_panel_version() {
-    if [[ -f "${BACKEND_DIR}/version.json" ]]; then
+    if [[ -f "${PANEL_DIR}/VERSION" ]]; then
+        head -n 1 "${PANEL_DIR}/VERSION" | tr -d '[:space:]'
+    elif [[ -f "${BACKEND_DIR}/VERSION" ]]; then
+        head -n 1 "${BACKEND_DIR}/VERSION" | tr -d '[:space:]'
+    elif [[ -f "${BACKEND_DIR}/version.json" ]]; then
         grep -o '"version": *"[^"]*"' "${BACKEND_DIR}/version.json" | head -n 1 | cut -d'"' -f4
     elif [[ -f "${BACKEND_DIR}/package.json" ]]; then
         grep -o '"version": *"[^"]*"' "${BACKEND_DIR}/package.json" | head -n 1 | cut -d'"' -f4

@@ -7,8 +7,13 @@ import { fileURLToPath } from 'url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 let appVersion = '1.0.0'
 try {
-  const verData = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../backend/version.json'), 'utf8'))
-  appVersion = verData.version || appVersion
+  const rootVersionFile = path.resolve(__dirname, '../VERSION')
+  if (fs.existsSync(rootVersionFile)) {
+    appVersion = fs.readFileSync(rootVersionFile, 'utf8').trim().split('\n')[0].trim()
+  } else {
+    const verData = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../backend/version.json'), 'utf8'))
+    appVersion = verData.version || appVersion
+  }
 } catch {}
 
 export default defineConfig({

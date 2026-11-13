@@ -9,6 +9,7 @@
 const path = require('path');
 const os   = require('os');
 const fs   = require('fs');
+const { VERSION } = require('./version');
 
 // Native .env loader (supports Node 20+ process.loadEnvFile with safe parsing fallback)
 function loadEnv(file) {
@@ -144,6 +145,7 @@ module.exports = {
   PRIVILEGED_SOCKET,
   PRIVILEGED_STAGING_DIR,
   PANEL_DIR,
+  VERSION,
   SERVER_IP,
 
   // Sing-box

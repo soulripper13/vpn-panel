@@ -117,6 +117,9 @@ if [[ -d "${SOURCE_DIR}/backend" ]]; then
         [[ -f "${SOURCE_DIR}/backend/package-lock.json" ]] && cp -f "${SOURCE_DIR}/backend/package-lock.json" "${BACKEND_DIR}/"
         [[ -d "${SOURCE_DIR}/backend/public" ]] && cp -rf "${SOURCE_DIR}/backend/public" "${BACKEND_DIR}/"
     fi
+    if [[ -f "${SOURCE_DIR}/VERSION" ]]; then
+        cp -f "${SOURCE_DIR}/VERSION" "${PANEL_DIR}/VERSION" 2>/dev/null || true
+    fi
     success "Backend files updated."
 else
     die "Backend source not found: ${SOURCE_DIR}/backend"

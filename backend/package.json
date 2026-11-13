@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
+    "pretest": "node ../scripts/sync-version.js",
     "test": "node --test",
+    "version": "node ../scripts/set-version.js",
     "lint": "eslint src/"
   },
   "dependencies": {
