@@ -11,7 +11,7 @@ const fs = require('fs');
 const path = require('path');
 
 // Primary version constant
-const VERSION = '1.5.1';
+const VERSION = '1.5.2';
 
 function getVersion() {
   const candidatePaths = [
