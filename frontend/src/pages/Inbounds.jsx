@@ -234,6 +234,7 @@ export default function Inbounds() {
                                   link: data.link,
                                   clashYaml: data.clashYaml,
                                   singboxJson: data.singboxJson,
+                                  hy2Config: data.hy2Config,
                                   inbound: inb,
                                   client: data,
                                 })
@@ -296,6 +297,7 @@ export default function Inbounds() {
               link: initialClient.link,
               clashYaml: initialClient.clashYaml,
               singboxJson: initialClient.singboxJson,
+              hy2Config: initialClient.hy2Config,
               inbound: created,
               client: initialClient,
             })
@@ -327,6 +329,7 @@ export default function Inbounds() {
         link={qrModalData?.link}
         clashYaml={qrModalData?.clashYaml}
         singboxJson={qrModalData?.singboxJson}
+        hy2Config={qrModalData?.hy2Config}
         inbound={qrModalData?.inbound}
         client={qrModalData?.client}
       />

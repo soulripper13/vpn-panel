@@ -31,6 +31,7 @@ export default function QRModal({
   link = '',
   clashYaml = '',
   singboxJson = '',
+  hy2Config = '',
   inbound = null,
   client = null,
 }) {
@@ -120,7 +121,7 @@ export default function QRModal({
   // If YAML or JSON not provided directly, compute from inbound & client
   const finalClashYaml = clashYaml || (inbound ? generateClashYaml(inbound, client, host) : '')
   const finalSingboxJson = singboxJson || (inbound ? generateSingboxJson(inbound, client, host) : '')
-  const finalHy2Cli = inbound ? generateHysteriaCliConfig(inbound, client, host) : ''
+  const finalHy2Cli = hy2Config || (inbound ? generateHysteriaCliConfig(inbound, client, host) : '')
 
   const handleCopy = (text, key) => {
     if (!text) return

@@ -24,6 +24,7 @@ const {
   generateHysteriaCliConfig,
   generateQRCode,
 } = require('../utils/link-generator');
+const { resolveTlsPair, getCertStorageDir } = require('../utils/tls-certs');
 const { requireAuth, requireAdminForMutations, requireAdmin } = require('../middleware/auth');
 const { validateBody } = require('../middleware/validate');
 const { logAudit } = require('../utils/audit');
@@ -303,6 +304,45 @@ router.post('/', validateBody(createInboundSchema), async (req, res) => {
       });
     }
 
+    const parsedSettings = typeof settings === 'string' ? JSON.parse(settings || '{}') : { ...(settings || {}) };
+    const parsedStream = typeof stream_settings === 'string' ? JSON.parse(stream_settings || '{}') : { ...(stream_settings || {}) };
+
+    const normType = (type || protocol || '').toLowerCase();
+    const needsTlsCert = ['hysteria', 'hysteria2', 'tuic', 'trojan'].includes(normType) ||
+      (['vless', 'vmess'].includes(normType) && (parsedStream.security === 'tls' || parsedSettings.tls));
+
+    if (needsTlsCert) {
+      const sniName = parsedStream.tlsSettings?.serverName || parsedStream.serverName || parsedSettings.serverName || parsedSettings.sni || 'gateway.icloud.com';
+      const certMode = parsedStream.certMode || parsedSettings.certMode || '';
+      const resolvedTls = resolveTlsPair({
+        certificate_path: parsedStream.certificate_path || parsedSettings.certificate_path,
+        certificateFile: parsedStream.certificateFile || parsedSettings.certificateFile,
+        key_path: parsedStream.key_path || parsedSettings.key_path,
+        keyFile: parsedStream.keyFile || parsedSettings.keyFile,
+        tlsSettings: parsedStream.tlsSettings,
+        serverName: sniName,
+        certMode,
+      });
+
+      parsedStream.certificateFile = resolvedTls.certificateFile;
+      parsedStream.keyFile = resolvedTls.keyFile;
+      if (parsedStream.tlsSettings) {
+        parsedStream.tlsSettings.certificates = [
+          { certificateFile: resolvedTls.certificateFile, keyFile: resolvedTls.keyFile },
+        ];
+      }
+      if (resolvedTls.isSelfSigned) {
+        parsedStream.certMode = certMode || 'selfsigned';
+        if (parsedStream.insecure === undefined && parsedSettings.insecure === undefined) {
+          parsedStream.insecure = true;
+          parsedSettings.insecure = true;
+        }
+        if (parsedStream.tlsSettings && parsedStream.tlsSettings.allowInsecure === undefined) {
+          parsedStream.tlsSettings.allowInsecure = Boolean(parsedStream.insecure);
+        }
+      }
+    }
+
     const { id: inboundId } = Inbound.create({
       engine,
       tag: finalTag,
@@ -310,8 +350,8 @@ router.post('/', validateBody(createInboundSchema), async (req, res) => {
       listen,
       port,
       protocol: protocol || type,
-      settings_json: typeof settings === 'string' ? settings : JSON.stringify(settings),
-      stream_settings_json: typeof stream_settings === 'string' ? stream_settings : JSON.stringify(stream_settings),
+      settings_json: JSON.stringify(parsedSettings),
+      stream_settings_json: JSON.stringify(parsedStream),
       enabled: enabled ? 1 : 0,
       total_bytes_limit: parseInt(total_bytes_limit || 0, 10),
       expiry_time: parseInt(expiry_time || 0, 10),
@@ -319,34 +359,41 @@ router.post('/', validateBody(createInboundSchema), async (req, res) => {
     });
 
     let createdClientInfo = null;
-    if (Array.isArray(clients) && clients.length > 0) {
-      for (const c of clients) {
-        const clientRes = Client.create({
+    try {
+      if (Array.isArray(clients) && clients.length > 0) {
+        for (const c of clients) {
+          const clientRes = Client.create({
+            inbound_id: inboundId,
+            uuid: c.uuid || uuidv4(),
+            password: c.password || crypto.randomBytes(16).toString('hex'),
+            email: c.email || `client_${inboundId}_${Date.now().toString(36)}`,
+            flow: c.flow || '',
+            total_bytes_limit: c.total_bytes_limit || 0,
+            expiry_time: c.expiry_time || 0,
+            enable: c.enable !== false ? 1 : 0,
+            remark: c.remark || '',
+          });
+          if (!createdClientInfo) createdClientInfo = clientRes;
+        }
+      } else {
+        createdClientInfo = Client.create({
           inbound_id: inboundId,
-          uuid: c.uuid || uuidv4(),
-          password: c.password || crypto.randomBytes(16).toString('hex'),
-          email: c.email || `client_${inboundId}_${Date.now().toString(36)}`,
-          flow: c.flow || '',
-          total_bytes_limit: c.total_bytes_limit || 0,
-          expiry_time: c.expiry_time || 0,
-          enable: c.enable !== false ? 1 : 0,
-          remark: c.remark || '',
+          uuid: uuidv4(),
+          password: crypto.randomBytes(16).toString('hex'),
+          email: `default_${inboundId}`,
+          flow: (type === 'vless' && (parsedStream.security === 'reality' || parsedSettings.reality)) ? 'xtls-rprx-vision' : '',
+          enable: 1,
+          remark: 'Default Client',
         });
-        if (!createdClientInfo) createdClientInfo = clientRes;
       }
-    } else {
-      createdClientInfo = Client.create({
-        inbound_id: inboundId,
-        uuid: uuidv4(),
-        password: crypto.randomBytes(16).toString('hex'),
-        email: `default_${inboundId}`,
-        flow: (type === 'vless' && (stream_settings.security === 'reality' || settings.reality)) ? 'xtls-rprx-vision' : '',
-        enable: 1,
-        remark: 'Default Client',
-      });
-    }
 
-    await applyEngineConfig(engine);
+      await applyEngineConfig(engine);
+    } catch (applyErr) {
+      // Roll back the database record so a failed config never poisons future engine applies
+      try { Inbound.delete(inboundId); } catch {}
+      const isConfigErr = /validation failed|configuration test failed|certificate|key file/i.test(applyErr.message || '');
+      return res.status(isConfigErr ? 400 : 500).json({ success: false, message: applyErr.message });
+    }
 
     logAudit({
       userId: req.session.user.id,
@@ -426,19 +473,69 @@ router.put('/:id', validateBody(updateInboundSchema), async (req, res) => {
       }
     }
     if (updatePayload.settings && typeof updatePayload.settings !== 'string') {
-      updatePayload.settings_json = JSON.stringify(updatePayload.settings);
-      delete updatePayload.settings;
+      const nextSettings = { ...updatePayload.settings };
+      updatePayload.settings = nextSettings;
+      updatePayload.settings_json = JSON.stringify(nextSettings);
     }
     if (updatePayload.stream_settings && typeof updatePayload.stream_settings !== 'string') {
-      updatePayload.stream_settings_json = JSON.stringify(updatePayload.stream_settings);
-      delete updatePayload.stream_settings;
+      const nextStream = { ...updatePayload.stream_settings };
+      const targetType = (updatePayload.type || existing.type || existing.protocol || '').toLowerCase();
+      const needsTls = ['hysteria', 'hysteria2', 'tuic', 'trojan'].includes(targetType) ||
+        (['vless', 'vmess'].includes(targetType) && nextStream.security === 'tls');
+      if (needsTls) {
+        const sniName = nextStream.tlsSettings?.serverName || nextStream.serverName || updatePayload.settings?.serverName || 'gateway.icloud.com';
+        const certDir = getCertStorageDir();
+        const existingCert = nextStream.certificateFile || nextStream.tlsSettings?.certificates?.[0]?.certificateFile || '';
+        const wasPanelSelfSigned = existingCert.startsWith(certDir);
+        const certMode = nextStream.certMode || (wasPanelSelfSigned ? 'selfsigned' : '');
+        const resolvedTls = resolveTlsPair({
+          certificate_path: nextStream.certificate_path,
+          certificateFile: nextStream.certificateFile,
+          key_path: nextStream.key_path,
+          keyFile: nextStream.keyFile,
+          tlsSettings: nextStream.tlsSettings,
+          serverName: sniName,
+          certMode,
+        });
+        nextStream.certificateFile = resolvedTls.certificateFile;
+        nextStream.keyFile = resolvedTls.keyFile;
+        if (nextStream.tlsSettings) {
+          nextStream.tlsSettings = {
+            ...nextStream.tlsSettings,
+            serverName: sniName,
+            certificates: [{ certificateFile: resolvedTls.certificateFile, keyFile: resolvedTls.keyFile }],
+          };
+        }
+      }
+      updatePayload.stream_settings = nextStream;
+      updatePayload.stream_settings_json = JSON.stringify(nextStream);
     }
     if (updatePayload.enabled !== undefined) {
       updatePayload.enabled = updatePayload.enabled ? 1 : 0;
     }
 
     Inbound.update(id, updatePayload);
-    await applyEngineConfig(existing.engine);
+    try {
+      await applyEngineConfig(existing.engine);
+    } catch (applyErr) {
+      try {
+        Inbound.update(id, {
+          tag: existing.tag,
+          type: existing.type,
+          listen: existing.listen,
+          port: existing.port,
+          protocol: existing.protocol,
+          settings_json: existing.settings_json,
+          stream_settings_json: existing.stream_settings_json,
+          enabled: existing.enabled ? 1 : 0,
+          total_bytes_limit: existing.total_bytes_limit,
+          expiry_time: existing.expiry_time,
+          remark: existing.remark,
+        });
+      } catch {}
+      const isConfigErr = /validation failed|configuration test failed|certificate|key file/i.test(applyErr.message || '');
+      return res.status(isConfigErr ? 400 : 500).json({ success: false, message: applyErr.message });
+    }
 
     logAudit({
       userId: req.session.user.id,
@@ -514,9 +611,15 @@ router.post('/:id/toggle', async (req, res) => {
       return res.status(404).json({ success: false, message: 'Inbound not found' });
     }
 
-    const newEnabled = existing.enabled === 1 ? 0 : 1;
+    const newEnabled = existing.enabled === 1 || existing.enabled === true ? 0 : 1;
     Inbound.update(id, { enabled: newEnabled });
-    await applyEngineConfig(existing.engine);
+    try {
+      await applyEngineConfig(existing.engine);
+    } catch (applyErr) {
+      try { Inbound.update(id, { enabled: existing.enabled ? 1 : 0 }); } catch {}
+      const isConfigErr = /validation failed|configuration test failed|certificate|key file/i.test(applyErr.message || '');
+      return res.status(isConfigErr ? 400 : 500).json({ success: false, message: applyErr.message });
+    }
 
     return res.json({
       success: true,
@@ -593,7 +696,13 @@ router.post('/:id/clients', validateBody(clientSchema), async (req, res) => {
       remark,
     });
 
-    await applyEngineConfig(inbound.engine);
+    try {
+      await applyEngineConfig(inbound.engine);
+    } catch (applyErr) {
+      try { Client.delete(clientId); } catch {}
+      const isConfigErr = /validation failed|configuration test failed|certificate|key file/i.test(applyErr.message || '');
+      return res.status(isConfigErr ? 400 : 500).json({ success: false, message: applyErr.message });
+    }
 
     logAudit({
       userId: req.session.user.id,
@@ -645,9 +754,22 @@ router.put('/:id/clients/:clientId', validateBody(updateClientSchema), async (re
     if (updateData.enable !== undefined) {
       updateData.enable = Boolean(updateData.enable);
     }
+    // Never overwrite real credentials with masked UI placeholders
+    if (typeof updateData.password === 'string' && updateData.password.includes('••••')) {
+      delete updateData.password;
+    }
+    if (typeof updateData.uuid === 'string' && updateData.uuid.includes('••••')) {
+      delete updateData.uuid;
+    }
 
     Client.update(client.id, updateData);
-    await applyEngineConfig(inbound.engine);
+    try {
+      await applyEngineConfig(inbound.engine);
+    } catch (applyErr) {
+      try { Client.update(client.id, client); } catch {}
+      const isConfigErr = /validation failed|configuration test failed|certificate|key file/i.test(applyErr.message || '');
+      return res.status(isConfigErr ? 400 : 500).json({ success: false, message: applyErr.message });
+    }
 
     const updated = Client.findById(client.id);
     return res.json({

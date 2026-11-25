@@ -22,7 +22,7 @@ import EditClientModal from '../components/modals/EditClientModal'
 import Spinner from '../components/ui/Spinner'
 import Toggle from '../components/ui/Toggle'
 import { formatBytes } from '../utils/format'
-import { generateUUID, generatePassword, generateHexPassword } from '../utils/links'
+import { generateUUID, generatePassword, generateHexPassword, generateBase64Key } from '../utils/links'
 import toast from 'react-hot-toast'
 
 export default function Clients() {
@@ -109,6 +109,7 @@ export default function Clients() {
         link: data.link,
         clashYaml: data.clashYaml,
         singboxJson: data.singboxJson,
+        hy2Config: data.hy2Config,
         inbound: parentInbound,
         client: { ...data, ...(c.subUrl ? { subUrl: c.subUrl } : {}) },
       })
@@ -131,6 +132,7 @@ export default function Clients() {
         link: client.link,
         clashYaml: client.clashYaml,
         singboxJson: client.singboxJson,
+        hy2Config: client.hy2Config,
         inbound: parentInbound,
         client,
       })
@@ -193,7 +195,8 @@ export default function Clients() {
       const targetInbound = inbounds.find((i) => i.id === parseInt(targetInboundId, 10))
       const isTargetStls = targetInbound?.type === 'shadowtls' || targetInbound?.protocol === 'shadowtls'
       const isTargetHy2 = targetInbound?.type === 'hysteria2' || targetInbound?.protocol === 'hysteria2' || targetInbound?.type === 'hysteria' || targetInbound?.protocol === 'hysteria'
-      const finalPassword = isTargetStls || isTargetHy2 ? clientPassword.trim() : (clientPassword || clientUuid)
+      const isTargetSs = targetInbound?.type === 'shadowsocks' || targetInbound?.protocol === 'shadowsocks'
+      const finalPassword = (isTargetStls || isTargetHy2 || isTargetSs) ? clientPassword.trim() : (clientPassword || clientUuid)
 
       const res = await api.post(`/inbounds/${targetInboundId}/clients`, {
         email: clientEmail.trim(),
@@ -213,6 +216,7 @@ export default function Clients() {
           link: res.data.data.link,
           clashYaml: res.data.data.clashYaml,
           singboxJson: res.data.data.singboxJson,
+          hy2Config: res.data.data.hy2Config,
           inbound: targetInbound,
           client: res.data.data,
         })
@@ -466,6 +470,9 @@ export default function Clients() {
                 const targetInb = inbounds.find((i) => i.id === parseInt(selectedInboundId || inbounds[0]?.id, 10))
                 const isStls = targetInb?.type === 'shadowtls' || targetInb?.protocol === 'shadowtls'
                 const isHy2 = targetInb?.type === 'hysteria2' || targetInb?.protocol === 'hysteria2' || targetInb?.type === 'hysteria' || targetInb?.protocol === 'hysteria'
+                const isSs = targetInb?.type === 'shadowsocks' || targetInb?.protocol === 'shadowsocks'
+                const ssMethod = targetInb?.settings?.method || ''
+                const isSs2022 = isSs && ssMethod.startsWith('2022-')
 
                 if (isStls) {
                   return (
@@ -491,6 +498,33 @@ export default function Clients() {
                       <p className="text-[11px] text-slate-400">
                         This plugin password will be used under <code className="text-purple-300 font-mono">plugin-opts.password</code> in OpenClash / Clash Meta.
                       </p>
+                    </div>
+                  )
+                }
+
+                if (isSs) {
+                  return (
+                    <div className="p-3 bg-[#14161f] border border-emerald-500/30 rounded-xl space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-medium text-emerald-300">
+                          {isSs2022 ? `Shadowsocks 2022 Key (${ssMethod.includes('256') ? '32-byte' : '16-byte'} Base64)` : 'Shadowsocks Password'}
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setClientPassword(isSs2022 ? generateBase64Key(ssMethod.includes('256') ? 32 : 16) : generatePassword(16))}
+                          className="text-[11px] text-emerald-400 hover:text-emerald-300 flex items-center space-x-1"
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                          <span>Randomize</span>
+                        </button>
+                      </div>
+                      <input
+                        type="text"
+                        required
+                        value={clientPassword}
+                        onChange={(e) => setClientPassword(e.target.value)}
+                        className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-emerald-500"
+                      />
                     </div>
                   )
                 }
@@ -607,6 +641,7 @@ export default function Clients() {
           link={activeQR.link}
           clashYaml={activeQR.clashYaml}
           singboxJson={activeQR.singboxJson}
+          hy2Config={activeQR.hy2Config}
           inbound={activeQR.inbound}
           client={activeQR.client}
         />

@@ -14,9 +14,8 @@ import {
   Network,
   Lock,
   User,
-  Hash,
-  Globe,
   Radar,
+  AlertTriangle,
 } from 'lucide-react'
 import { generateUUID, generatePassword, generateHexPassword, generateBase64Key } from '../../utils/links'
 import api from '../../utils/api'
@@ -64,25 +63,36 @@ const realityTargetSniPresets = [
   { sni: 'www.yahoo.com', dest: 'www.yahoo.com:443', label: 'Yahoo' },
 ]
 
+function randomPort() {
+  return Math.floor(10000 + Math.random() * 50000)
+}
+
+function generateSsKeyForMethod(method) {
+  if (method === '2022-blake3-aes-256-gcm') return generateBase64Key(32)
+  if (method && method.startsWith('2022-')) return generateBase64Key(16)
+  return generatePassword(16)
+}
+
 export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni, prefillDest }) {
   const [step, setStep] = useState(1)
   const [engine, setEngine] = useState('singbox')
   const [selectedProtocol, setSelectedProtocol] = useState('shadowtls')
   const [loading, setLoading] = useState(false)
   const [genKeyLoading, setGenKeyLoading] = useState(false)
+  const [settingsCerts, setSettingsCerts] = useState({ fullchain: '', privkey: '' })
 
   // 1. General Settings
   const [remark, setRemark] = useState('')
-  const [port, setPort] = useState(Math.floor(10000 + Math.random() * 50000))
+  const [port, setPort] = useState(() => randomPort())
   const [listen, setListen] = useState('0.0.0.0')
   const [totalTrafficLimitGb, setTotalTrafficLimitGb] = useState(0)
   const [expiryDays, setExpiryDays] = useState(0)
 
   // 2. Transport (Network)
-  const [transport, setTransport] = useState('tcp') // tcp, ws, grpc, httpupgrade
+  const [transport, setTransport] = useState('tcp')
   const [wsPath, setWsPath] = useState('/')
   const [wsHost, setWsHost] = useState('')
-  const [grpcServiceName, setGrpcServiceName] = useState('')
+  const [grpcServiceName, setGrpcServiceName] = useState('grpc')
 
   // 3. Security (none, tls, reality)
   const [security, setSecurity] = useState('none')
@@ -90,11 +100,11 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
   const [dest, setDest] = useState('gateway.icloud.com:443')
   const [privateKey, setPrivateKey] = useState('')
   const [publicKey, setPublicKey] = useState('')
-  const [shortId, setShortId] = useState(generatePassword(4))
+  const [shortId, setShortId] = useState(() => generatePassword(4))
   const [fingerprint, setFingerprint] = useState('chrome')
   const [alpn, setAlpn] = useState('h2,http/1.1')
 
-  // 4. Protocol Specifics
+  // 4. Protocol Specifics & TLS Certs
   const [ssMethod, setSsMethod] = useState('2022-blake3-aes-128-gcm')
   const [ssPassword, setSsPassword] = useState(() => generateBase64Key(16))
   const [shadowtlsPassword, setShadowtlsPassword] = useState(() => generateHexPassword(16))
@@ -107,102 +117,23 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
   const [udpHopEnabled, setUdpHopEnabled] = useState(true)
   const [udpHopPorts, setUdpHopPorts] = useState('20000-50000')
   const [hopInterval, setHopInterval] = useState('5-10')
-  const [certPreset, setCertPreset] = useState('settings')
+  const [certPreset, setCertPreset] = useState('selfsigned')
   const [certificateFile, setCertificateFile] = useState('')
   const [keyFile, setKeyFile] = useState('')
+  const [insecure, setInsecure] = useState(true)
   const [clientAuth, setClientAuth] = useState(() => generatePassword(16))
   const [tuicCongestion, setTuicCongestion] = useState('bbr')
+  const [tuicZeroRtt, setTuicZeroRtt] = useState(true)
+  const [wgPeerPubKey, setWgPeerPubKey] = useState('')
+  const [wgLocalAddr, setWgLocalAddr] = useState('10.0.0.1/24')
 
   // 5. Client & Flow
-  const [clientEmail, setClientEmail] = useState(`user_${Date.now().toString(36)}`)
-  const [clientUuid, setClientUuid] = useState(generateUUID())
+  const [clientEmail, setClientEmail] = useState(() => `user_${Date.now().toString(36)}`)
+  const [clientUuid, setClientUuid] = useState(() => generateUUID())
   const [clientFlow, setClientFlow] = useState('xtls-rprx-vision')
 
   // 6. Sniffing
-  const [sniffing, setSniffing] = useState(true)
-
-  useEffect(() => {
-    if (isOpen) {
-      // Load configured certificates dynamically from settings API
-      api.get('/settings').then((res) => {
-        if (res.data?.data) {
-          if (res.data.data.cert_fullchain) setCertificateFile(res.data.data.cert_fullchain)
-          if (res.data.data.cert_privkey) setKeyFile(res.data.data.cert_privkey)
-        }
-      }).catch(() => {})
-
-      if (prefillSni) {
-        setServerName(prefillSni)
-        setDest(prefillDest || `${prefillSni}:443`)
-        setSecurity('reality')
-        setSelectedProtocol('vless')
-        setEngine('singbox')
-      }
-    }
-  }, [isOpen, prefillSni, prefillDest])
-
-  if (!isOpen) return null
-
-  const handleCertPresetChange = (preset) => {
-    setCertPreset(preset)
-    const currentHost = window.location.hostname || ''
-    if (preset === 'settings') {
-      api.get('/settings').then((res) => {
-        if (res.data?.data) {
-          if (res.data.data.cert_fullchain) setCertificateFile(res.data.data.cert_fullchain)
-          if (res.data.data.cert_privkey) setKeyFile(res.data.data.cert_privkey)
-        }
-      }).catch(() => {})
-      setServerName(currentHost)
-    } else if (preset === 'letsencrypt') {
-      setServerName(currentHost)
-      setCertificateFile(`/etc/letsencrypt/live/${currentHost}/fullchain.pem`)
-      setKeyFile(`/etc/letsencrypt/live/${currentHost}/privkey.pem`)
-    } else if (preset === 'custom') {
-      // Keep existing or clear
-    }
-  }
-
-  const handleProtocolSelect = (protoType) => {
-    setSelectedProtocol(protoType)
-    setRemark(`${engine}-${protoType}-${port}`)
-    const currentHost = window.location.hostname || ''
-
-    if (protoType === 'shadowtls') {
-      setSecurity('none')
-      setServerName('gateway.icloud.com')
-      setDest('gateway.icloud.com:443')
-      setSsMethod('2022-blake3-aes-128-gcm')
-      setShadowtlsPassword(generateHexPassword(16))
-      setSsPassword(generateBase64Key(16))
-    } else if (protoType === 'vless') {
-      setSecurity('reality')
-      setServerName('www.microsoft.com')
-      setDest('www.microsoft.com:443')
-      setClientFlow('xtls-rprx-vision')
-      generateRealityKeys()
-    } else if (protoType === 'hysteria2') {
-      setSecurity('tls')
-      setServerName(currentHost)
-      setAlpn('h3,h2,http/1.1')
-      setCertPreset('settings')
-      setUdpHopEnabled(true)
-      setUdpHopPorts('20000-50000')
-      setHopInterval('5-10')
-      setObfsEnabled(true)
-      setObfsPassword(generatePassword(8))
-      setClientAuth(generatePassword(16))
-    } else if (protoType === 'tuic') {
-      setSecurity('tls')
-      setServerName(currentHost)
-    } else if (protoType === 'trojan') {
-      setSecurity('tls')
-      setServerName(currentHost)
-    } else if (protoType === 'vmess') {
-      setTransport('ws')
-      setWsPath('/vmess-ws')
-    }
-  }
+  const [sniffing] = useState(true)
 
   const generateRealityKeys = async () => {
     try {
@@ -212,14 +143,168 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
         setPrivateKey(res.data.data.privateKey || '')
         setPublicKey(res.data.data.publicKey || '')
         if (res.data.data.shortId) setShortId(res.data.data.shortId)
-        toast.success('Generated fresh X25519 reality keypair!')
       }
     } catch {
-      setPrivateKey(generatePassword(32))
-      setPublicKey(generatePassword(32))
-      setShortId(generatePassword(4))
+      toast.error('Failed to generate X25519 Reality keypair from server')
     } finally {
       setGenKeyLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!isOpen) return
+
+    const freshPort = randomPort()
+    setStep(1)
+    setPort(freshPort)
+    setListen('0.0.0.0')
+    setTotalTrafficLimitGb(0)
+    setExpiryDays(0)
+    setClientEmail(`user_${Date.now().toString(36)}`)
+    setClientUuid(generateUUID())
+    setClientAuth(generatePassword(16))
+    setSsPassword(generateBase64Key(16))
+    setShadowtlsPassword(generateHexPassword(16))
+    setObfsPassword(generatePassword(8))
+    setShortId(generatePassword(4))
+
+    api.get('/settings').then((res) => {
+      const fullchain = res.data?.data?.cert_fullchain || ''
+      const privkey = res.data?.data?.cert_privkey || ''
+      setSettingsCerts({ fullchain, privkey })
+      if (fullchain && privkey) {
+        setCertificateFile(fullchain)
+        setKeyFile(privkey)
+      } else {
+        setCertificateFile('')
+        setKeyFile('')
+      }
+    }).catch(() => {})
+
+    if (prefillSni) {
+      setEngine('singbox')
+      setSelectedProtocol('vless')
+      setRemark(`singbox-vless-${freshPort}`)
+      setSecurity('reality')
+      setTransport('tcp')
+      setServerName(prefillSni)
+      setDest(prefillDest || `${prefillSni}:443`)
+      setClientFlow('xtls-rprx-vision')
+      generateRealityKeys()
+    } else {
+      setEngine('singbox')
+      setSelectedProtocol('shadowtls')
+      setRemark(`singbox-shadowtls-${freshPort}`)
+      setSecurity('none')
+      setTransport('tcp')
+      setServerName('gateway.icloud.com')
+      setDest('gateway.icloud.com:443')
+    }
+  }, [isOpen, prefillSni, prefillDest])
+
+  if (!isOpen) return null
+
+  const hasSettingsCert = Boolean(settingsCerts.fullchain && settingsCerts.privkey)
+
+  const handleCertPresetChange = (preset) => {
+    setCertPreset(preset)
+    const currentHost = typeof window !== 'undefined' ? (window.location.hostname || '') : ''
+    if (preset === 'selfsigned') {
+      setCertificateFile('')
+      setKeyFile('')
+      setInsecure(true)
+    } else if (preset === 'settings') {
+      setCertificateFile(settingsCerts.fullchain || '')
+      setKeyFile(settingsCerts.privkey || '')
+      setInsecure(!hasSettingsCert)
+    } else if (preset === 'letsencrypt') {
+      const domain = currentHost && !/^(\d{1,3}\.){3}\d{1,3}$/.test(currentHost) ? currentHost : 'example.com'
+      if (!serverName || serverName === 'gateway.icloud.com') {
+        setServerName(domain)
+      }
+      setCertificateFile(`/etc/letsencrypt/live/${domain}/fullchain.pem`)
+      setKeyFile(`/etc/letsencrypt/live/${domain}/privkey.pem`)
+      setInsecure(false)
+    } else if (preset === 'custom') {
+      setInsecure(false)
+    }
+  }
+
+  const handleProtocolSelect = (protoType, targetEngine = engine) => {
+    setSelectedProtocol(protoType)
+    setRemark(`${targetEngine}-${protoType}-${port}`)
+
+    if (protoType === 'shadowtls') {
+      setSecurity('none')
+      setTransport('tcp')
+      setServerName('gateway.icloud.com')
+      setDest('gateway.icloud.com:443')
+      setSsMethod('2022-blake3-aes-128-gcm')
+      setShadowtlsPassword(generateHexPassword(16))
+      setSsPassword(generateBase64Key(16))
+    } else if (protoType === 'shadowsocks') {
+      setSecurity('none')
+      setTransport('tcp')
+      const defaultMethod = '2022-blake3-aes-128-gcm'
+      setSsMethod(defaultMethod)
+      setSsPassword(generateSsKeyForMethod(defaultMethod))
+    } else if (protoType === 'vless') {
+      setSecurity('reality')
+      setTransport('tcp')
+      setServerName('gateway.icloud.com')
+      setDest('gateway.icloud.com:443')
+      setClientFlow('xtls-rprx-vision')
+      generateRealityKeys()
+    } else if (protoType === 'hysteria2') {
+      setSecurity('tls')
+      setTransport('hysteria')
+      setServerName('gateway.icloud.com')
+      setAlpn('h3')
+      // Default to self-signed for camouflage SNIs or when no server cert is configured
+      setCertPreset(hasSettingsCert ? 'settings' : 'selfsigned')
+      setCertificateFile(hasSettingsCert ? settingsCerts.fullchain : '')
+      setKeyFile(hasSettingsCert ? settingsCerts.privkey : '')
+      setInsecure(true)
+      setUdpHopEnabled(true)
+      setUdpHopPorts('20000-50000')
+      setHopInterval('5-10')
+      setObfsEnabled(true)
+      setObfsPassword(generatePassword(8))
+      setClientAuth(generatePassword(16))
+    } else if (protoType === 'tuic') {
+      setSecurity('tls')
+      setTransport('tcp')
+      setServerName('gateway.icloud.com')
+      setAlpn('h3')
+      setCertPreset(hasSettingsCert ? 'settings' : 'selfsigned')
+      setCertificateFile(hasSettingsCert ? settingsCerts.fullchain : '')
+      setKeyFile(hasSettingsCert ? settingsCerts.privkey : '')
+      setInsecure(true)
+    } else if (protoType === 'trojan') {
+      setSecurity('tls')
+      setTransport('tcp')
+      setAlpn('h2,http/1.1')
+      setCertPreset(hasSettingsCert ? 'settings' : 'selfsigned')
+      setCertificateFile(hasSettingsCert ? settingsCerts.fullchain : '')
+      setKeyFile(hasSettingsCert ? settingsCerts.privkey : '')
+      setInsecure(!hasSettingsCert)
+      const currentHost = typeof window !== 'undefined' ? (window.location.hostname || 'gateway.icloud.com') : 'gateway.icloud.com'
+      setServerName(currentHost)
+    } else if (protoType === 'vmess') {
+      setSecurity('none')
+      setTransport('ws')
+      setWsPath('/vmess-ws')
+      setAlpn('h2,http/1.1')
+    } else {
+      setSecurity('none')
+      setTransport('tcp')
+    }
+  }
+
+  const handleSsMethodChange = (nextMethod) => {
+    setSsMethod(nextMethod)
+    if (selectedProtocol === 'shadowsocks' || selectedProtocol === 'shadowtls') {
+      setSsPassword(generateSsKeyForMethod(nextMethod))
     }
   }
 
@@ -230,24 +315,51 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+
+    if (security === 'reality' && ['vless', 'trojan'].includes(selectedProtocol) && !privateKey.trim()) {
+      toast.error('Reality private key is required. Click "Gen Keys" first.')
+      return
+    }
+
     try {
       setLoading(true)
 
       const expiryEpoch = expiryDays > 0 ? Math.floor(Date.now() / 1000) + expiryDays * 86400 : 0
       const bytesLimit = totalTrafficLimitGb > 0 ? totalTrafficLimitGb * 1024 * 1024 * 1024 : 0
 
+      const isTlsProtocol = selectedProtocol === 'hysteria2' || selectedProtocol === 'tuic' || selectedProtocol === 'trojan' ||
+        (['vless', 'vmess'].includes(selectedProtocol) && security === 'tls')
+
       const finalObfs = (selectedProtocol === 'hysteria2' && obfsEnabled) ? obfsPassword.trim() : ''
       const finalHopPorts = (selectedProtocol === 'hysteria2' && udpHopEnabled) ? udpHopPorts.trim() : ''
-      const finalClientPass = selectedProtocol === 'shadowtls'
-        ? shadowtlsPassword
-        : (selectedProtocol === 'hysteria2' ? clientAuth : password)
+
+      let finalClientPass = password
+      if (selectedProtocol === 'shadowtls') {
+        finalClientPass = shadowtlsPassword
+      } else if (selectedProtocol === 'hysteria2') {
+        finalClientPass = clientAuth
+      } else if (selectedProtocol === 'shadowsocks') {
+        finalClientPass = ssPassword
+      }
+
+      const effectiveSecurity = selectedProtocol === 'hysteria2' || selectedProtocol === 'tuic'
+        ? 'tls'
+        : (selectedProtocol === 'vmess' && security === 'reality' ? 'none' : security)
+
+      const effectiveNetwork = selectedProtocol === 'hysteria2' ? 'hysteria' : transport
+
+      const certPayload = certPreset === 'selfsigned'
+        ? { certificateFile: '', keyFile: '' }
+        : { certificateFile: certificateFile.trim(), keyFile: keyFile.trim() }
+
+      const alpnList = alpn.split(',').map((s) => s.trim()).filter(Boolean)
 
       const payload = {
         engine,
         type: selectedProtocol,
         listen,
         port: parseInt(port, 10),
-        remark: remark || `${selectedProtocol}-${port}`,
+        remark: remark || `${engine}-${selectedProtocol}-${port}`,
         total_bytes_limit: bytesLimit,
         expiry_time: expiryEpoch,
         settings: {
@@ -256,31 +368,37 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
           ssPassword,
           shadowtlsPassword,
           password: finalClientPass,
-          serverName,
+          serverName: serverName.trim(),
           shadowtlsVersion,
-          up_mbps: upMbps,
-          down_mbps: downMbps,
+          up_mbps: parseInt(upMbps || 100, 10),
+          down_mbps: parseInt(downMbps || 100, 10),
           obfsPassword: finalObfs,
           ports: finalHopPorts,
           udpHopPorts: finalHopPorts,
           hopInterval,
           congestion_control: tuicCongestion,
-          dest,
-          privateKey,
-          publicKey,
-          shortId,
+          zero_rtt_handshake: tuicZeroRtt,
+          ...(selectedProtocol === 'wireguard' ? {
+            local_address: [wgLocalAddr || '10.0.0.1/24'],
+            peer_public_key: wgPeerPubKey.trim(),
+          } : {}),
+          dest: dest.trim(),
+          privateKey: privateKey.trim(),
+          publicKey: publicKey.trim(),
+          shortId: shortId.trim(),
           fingerprint,
+          ...(isTlsProtocol ? { insecure: Boolean(insecure), certMode: certPreset } : {}),
         },
         stream_settings: {
-          network: selectedProtocol === 'hysteria2' ? 'hysteria' : transport,
-          security,
-          serverName,
-          dest,
-          privateKey,
-          publicKey,
-          shortId,
+          network: effectiveNetwork,
+          security: effectiveSecurity,
+          serverName: serverName.trim(),
+          dest: dest.trim(),
+          privateKey: privateKey.trim(),
+          publicKey: publicKey.trim(),
+          shortId: shortId.trim(),
           fingerprint,
-          alpn: alpn.split(',').map((s) => s.trim()),
+          alpn: alpnList.length > 0 ? alpnList : (selectedProtocol === 'hysteria2' || selectedProtocol === 'tuic' ? ['h3'] : ['h2', 'http/1.1']),
           wsPath,
           wsHost,
           grpcServiceName,
@@ -288,54 +406,34 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
           ports: finalHopPorts,
           udpHopPorts: finalHopPorts,
           hopInterval,
-          certificateFile,
-          keyFile,
+          ...certPayload,
+          ...(isTlsProtocol ? { insecure: Boolean(insecure), certMode: certPreset } : {}),
           sniffing,
-          ...(selectedProtocol === 'hysteria2' && (finalHopPorts || finalObfs) ? {
+          ...(selectedProtocol === 'hysteria2' && finalObfs ? {
             finalmask: {
-              ...(finalHopPorts ? {
-                quicParams: {
-                  congestion: 'bbr',
-                  udpHop: {
-                    ports: finalHopPorts,
-                    interval: hopInterval || '5-10',
-                  },
-                },
-              } : {}),
-              ...(finalObfs ? {
-                udp: [
-                  {
-                    type: 'salamander',
-                    settings: { password: finalObfs },
-                  },
-                ],
-              } : {}),
-            },
-          } : {}),
-          ...(selectedProtocol === 'hysteria2' ? {
-            hysteriaSettings: {
-              auth: '',
-              udpIdleTimeout: 60,
-              version: 2,
-            },
-            tlsSettings: {
-              alpn: ['h3', 'h2', 'http/1.1'],
-              serverName,
-              certificates: [
+              udp: [
                 {
-                  certificateFile,
-                  keyFile,
+                  type: 'salamander',
+                  settings: { password: finalObfs },
                 },
               ],
+            },
+          } : {}),
+          ...(isTlsProtocol ? {
+            tlsSettings: {
+              alpn: alpnList.length > 0 ? alpnList : (selectedProtocol === 'hysteria2' || selectedProtocol === 'tuic' ? ['h3'] : ['h2', 'http/1.1']),
+              serverName: serverName.trim(),
+              allowInsecure: Boolean(insecure),
+              certificates: [certPayload],
             },
           } : {}),
         },
         clients: [
           {
-            email: clientEmail,
-            uuid: clientUuid,
+            email: clientEmail.trim(),
+            uuid: clientUuid.trim(),
             password: finalClientPass,
-            flow: selectedProtocol === 'vless' && security === 'reality' ? clientFlow : '',
+            flow: selectedProtocol === 'vless' && effectiveSecurity === 'reality' && transport === 'tcp' ? clientFlow : '',
             total_bytes_limit: bytesLimit,
             expiry_time: expiryEpoch,
             remark: 'Primary User',
@@ -345,7 +443,7 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
 
       const res = await api.post('/inbounds', payload)
       if (res.data.success) {
-        toast.success(`Inbound ${remark} created and deployed!`)
+        toast.success(`Inbound ${remark || selectedProtocol} created and deployed!`)
         onSuccess(res.data.data)
         onClose()
       }
@@ -355,6 +453,157 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
       setLoading(false)
     }
   }
+
+  const securityOptions = selectedProtocol === 'vmess'
+    ? ['none', 'tls']
+    : (selectedProtocol === 'trojan'
+        ? (engine === 'xray' ? ['tls', 'reality'] : ['tls'])
+        : ['none', 'tls', 'reality'])
+
+  const renderTlsCertSection = (borderClass = 'border-[#2d3148]') => (
+    <div className={`p-3 bg-[#1a1d27] border ${borderClass} rounded-xl space-y-3`}>
+      <div className="flex items-center justify-between">
+        <label className="text-xs font-medium text-slate-200">TLS Certificate & Server Domain (SNI)</label>
+        <Link
+          to="/sni-finder"
+          target="_blank"
+          className="text-[11px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-medium transition"
+        >
+          <Radar className="w-3 h-3" />
+          <span>Ideal SNI Finder</span>
+        </Link>
+      </div>
+
+      <div className="flex flex-wrap gap-1.5">
+        <button
+          type="button"
+          onClick={() => handleCertPresetChange('selfsigned')}
+          className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition ${
+            certPreset === 'selfsigned'
+              ? 'bg-emerald-600/20 text-emerald-300 border-emerald-500/50'
+              : 'bg-slate-800 text-slate-400 border-slate-700'
+          }`}
+        >
+          Self-Signed (Auto)
+        </button>
+        <button
+          type="button"
+          onClick={() => handleCertPresetChange('settings')}
+          disabled={!hasSettingsCert}
+          title={hasSettingsCert ? 'Use certificate configured in Panel Settings' : 'No certificate configured in Panel Settings'}
+          className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition disabled:opacity-40 disabled:cursor-not-allowed ${
+            certPreset === 'settings'
+              ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/50'
+              : 'bg-slate-800 text-slate-400 border-slate-700'
+          }`}
+        >
+          Panel Settings Cert {!hasSettingsCert && '(None)'}
+        </button>
+        <button
+          type="button"
+          onClick={() => handleCertPresetChange('letsencrypt')}
+          className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition ${
+            certPreset === 'letsencrypt'
+              ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/50'
+              : 'bg-slate-800 text-slate-400 border-slate-700'
+          }`}
+        >
+          Let&apos;s Encrypt
+        </button>
+        <button
+          type="button"
+          onClick={() => handleCertPresetChange('custom')}
+          className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition ${
+            certPreset === 'custom'
+              ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/50'
+              : 'bg-slate-800 text-slate-400 border-slate-700'
+          }`}
+        >
+          Custom Paths
+        </button>
+      </div>
+
+      {certPreset === 'selfsigned' && (
+        <div className="p-2 bg-emerald-950/20 border border-emerald-500/20 rounded-lg text-[11px] text-emerald-200/90 leading-relaxed">
+          Automatically generates an ECDSA self-signed certificate matching your SNI (e.g. <code className="font-mono text-emerald-300">{serverName || 'gateway.icloud.com'}</code>) and enables <code className="font-mono text-emerald-300">insecure=1</code> for clients so camouflage SNIs work without CA errors.
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs text-slate-400 block mb-1">SNI (Server Name)</label>
+          <input
+            type="text"
+            required
+            value={serverName}
+            onChange={(e) => setServerName(e.target.value)}
+            placeholder="gateway.icloud.com"
+            className="w-full bg-[#14161f] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
+          />
+        </div>
+        <div>
+          <label className="text-xs text-slate-400 block mb-1">ALPN Protocol</label>
+          <input
+            type="text"
+            value={alpn}
+            onChange={(e) => setAlpn(e.target.value)}
+            placeholder={selectedProtocol === 'hysteria2' || selectedProtocol === 'tuic' ? 'h3' : 'h2,http/1.1'}
+            className="w-full bg-[#14161f] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
+          />
+        </div>
+      </div>
+
+      {(certPreset === 'letsencrypt' || certPreset === 'custom') && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+          <div>
+            <label className="text-xs text-slate-400 block mb-1">Fullchain Certificate Path *</label>
+            <input
+              type="text"
+              required
+              value={certificateFile}
+              onChange={(e) => setCertificateFile(e.target.value)}
+              placeholder="/etc/letsencrypt/live/domain.com/fullchain.pem"
+              className="w-full bg-[#14161f] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-slate-400 block mb-1">Private Key Path *</label>
+            <input
+              type="text"
+              required
+              value={keyFile}
+              onChange={(e) => setKeyFile(e.target.value)}
+              placeholder="/etc/letsencrypt/live/domain.com/privkey.pem"
+              className="w-full bg-[#14161f] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+        </div>
+      )}
+
+      <div className="flex items-start space-x-2 pt-1">
+        <input
+          type="checkbox"
+          id="addTlsInsecure"
+          checked={insecure}
+          onChange={(e) => setInsecure(e.target.checked)}
+          className="mt-0.5 rounded bg-[#14161f] border-[#2d3148] text-indigo-600 focus:ring-0"
+        />
+        <label htmlFor="addTlsInsecure" className="text-xs text-slate-300 leading-snug">
+          Skip TLS Certificate Verification on clients (<code className="font-mono text-amber-300">insecure=1</code>)
+          <span className="block text-[10px] text-slate-500">
+            Required when using a self-signed certificate or a camouflage SNI like gateway.icloud.com that you don&apos;t own a CA certificate for.
+          </span>
+        </label>
+      </div>
+
+      {!insecure && serverName && certPreset !== 'letsencrypt' && certPreset !== 'custom' && (
+        <div className="flex items-center space-x-2 p-2 bg-amber-950/30 border border-amber-500/30 rounded-lg text-[11px] text-amber-200">
+          <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0" />
+          <span>If your server certificate is not CA-signed for <strong>{serverName}</strong>, clients will get a certificate error unless Skip TLS Verification is enabled.</span>
+        </div>
+      )}
+    </div>
+  )
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fadeIn">
@@ -385,7 +634,7 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
                     type="button"
                     onClick={() => {
                       setEngine('singbox')
-                      handleProtocolSelect('shadowtls')
+                      handleProtocolSelect('shadowtls', 'singbox')
                     }}
                     className={`p-4 rounded-xl border text-left transition flex items-center space-x-3.5 ${
                       engine === 'singbox'
@@ -404,7 +653,7 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
                     type="button"
                     onClick={() => {
                       setEngine('xray')
-                      handleProtocolSelect('vless')
+                      handleProtocolSelect('vless', 'xray')
                     }}
                     className={`p-4 rounded-xl border text-left transition flex items-center space-x-3.5 ${
                       engine === 'xray'
@@ -429,7 +678,7 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
                     <button
                       key={proto.type}
                       type="button"
-                      onClick={() => handleProtocolSelect(proto.type)}
+                      onClick={() => handleProtocolSelect(proto.type, engine)}
                       className={`p-3.5 rounded-xl border text-left transition ${
                         selectedProtocol === proto.type
                           ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300 shadow-md'
@@ -472,7 +721,7 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
                       <label className="text-xs text-slate-400">Listen Port</label>
                       <button
                         type="button"
-                        onClick={() => setPort(Math.floor(10000 + Math.random() * 50000))}
+                        onClick={() => setPort(randomPort())}
                         className="text-[10px] text-indigo-400 hover:text-indigo-300"
                       >
                         Randomize
@@ -528,183 +777,160 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
                 </div>
               </div>
 
-              {/* 2. Security & Camouflage */}
-              <div className="bg-[#14161f] border border-[#2d3148] rounded-xl p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2 text-xs font-semibold text-slate-300 uppercase tracking-wider">
-                    <Lock className="w-3.5 h-3.5 text-indigo-400" />
-                    <span>Security & Camouflage</span>
+              {/* 2. Security & Camouflage (VLESS / VMess / Trojan) */}
+              {['vless', 'vmess', 'trojan'].includes(selectedProtocol) && (
+                <div className="bg-[#14161f] border border-[#2d3148] rounded-xl p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2 text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                      <Lock className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>Security & Camouflage</span>
+                    </div>
+
+                    <div className="flex items-center space-x-1 bg-[#1a1d27] p-1 rounded-lg border border-[#2d3148] text-xs">
+                      {securityOptions.map((sec) => (
+                        <button
+                          key={sec}
+                          type="button"
+                          onClick={() => {
+                            setSecurity(sec)
+                            if (sec === 'reality' && !privateKey) generateRealityKeys()
+                          }}
+                          className={`px-2.5 py-0.5 rounded-md capitalize font-medium transition ${
+                            security === sec ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          {sec}
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
-                  {/* Security switcher */}
-                  <div className="flex items-center space-x-1 bg-[#1a1d27] p-1 rounded-lg border border-[#2d3148] text-xs">
-                    {['none', 'tls', 'reality'].map((sec) => (
-                      <button
-                        key={sec}
-                        type="button"
-                        onClick={() => {
-                          setSecurity(sec)
-                          if (sec === 'reality' && !privateKey) generateRealityKeys()
-                        }}
-                        className={`px-2.5 py-0.5 rounded-md capitalize font-medium transition ${
-                          security === sec ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'
-                        }`}
-                      >
-                        {sec}
-                      </button>
-                    ))}
-                  </div>
+                  {security === 'reality' && (
+                    <div className="space-y-3 pt-2">
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-[11px] text-slate-400">Reality Target Presets:</span>
+                          <Link
+                            to="/sni-finder"
+                            target="_blank"
+                            className="text-[11px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-medium transition"
+                          >
+                            <Radar className="w-3 h-3" />
+                            <span>Ideal SNI Finder Tool</span>
+                          </Link>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {realityTargetSniPresets.map((p) => (
+                            <button
+                              key={p.sni}
+                              type="button"
+                              onClick={() => handlePresetSelect(p)}
+                              className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] border border-slate-700 transition"
+                            >
+                              {p.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-xs text-slate-400 block mb-1">Target Server (dest)</label>
+                          <input
+                            type="text"
+                            required
+                            value={dest}
+                            onChange={(e) => setDest(e.target.value)}
+                            className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-xs text-slate-400 block mb-1">SNI (Server Name)</label>
+                          <input
+                            type="text"
+                            required
+                            value={serverName}
+                            onChange={(e) => setServerName(e.target.value)}
+                            className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="text-xs text-slate-400">Private Key</label>
+                            <button
+                              type="button"
+                              onClick={generateRealityKeys}
+                              className="text-[10px] text-indigo-400 hover:text-indigo-300 flex items-center space-x-1"
+                            >
+                              <RefreshCw className={`w-3 h-3 ${genKeyLoading ? 'animate-spin' : ''}`} />
+                              <span>Gen Keys</span>
+                            </button>
+                          </div>
+                          <input
+                            type="text"
+                            required
+                            value={privateKey}
+                            onChange={(e) => setPrivateKey(e.target.value)}
+                            className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-xs text-slate-400 block mb-1">Public Key (Client Share)</label>
+                          <input
+                            type="text"
+                            value={publicKey}
+                            onChange={(e) => setPublicKey(e.target.value)}
+                            className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="text-xs text-slate-400">Short ID</label>
+                            <button
+                              type="button"
+                              onClick={() => setShortId(generatePassword(4))}
+                              className="text-[10px] text-indigo-400 hover:text-indigo-300"
+                            >
+                              New ShortID
+                            </button>
+                          </div>
+                          <input
+                            type="text"
+                            value={shortId}
+                            onChange={(e) => setShortId(e.target.value)}
+                            className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-xs text-slate-400 block mb-1">uTLS Fingerprint</label>
+                          <select
+                            value={fingerprint}
+                            onChange={(e) => setFingerprint(e.target.value)}
+                            className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+                          >
+                            <option value="chrome">Chrome (Recommended)</option>
+                            <option value="firefox">Firefox</option>
+                            <option value="safari">Safari</option>
+                            <option value="ios">iOS</option>
+                            <option value="random">Randomized</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {security === 'tls' && renderTlsCertSection()}
                 </div>
-
-                {security === 'reality' && (
-                  <div className="space-y-3 pt-2">
-                    {/* SNI Presets */}
-                    <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-[11px] text-slate-400">Reality Target Presets:</span>
-                        <Link
-                          to="/sni-finder"
-                          target="_blank"
-                          className="text-[11px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1 font-medium transition"
-                        >
-                          <Radar className="w-3 h-3" />
-                          <span>⚡ Ideal SNI Finder Tool</span>
-                        </Link>
-                      </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {realityTargetSniPresets.map((p) => (
-                          <button
-                            key={p.sni}
-                            type="button"
-                            onClick={() => handlePresetSelect(p)}
-                            className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] border border-slate-700 transition"
-                          >
-                            {p.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="text-xs text-slate-400 block mb-1">Target Server (dest)</label>
-                        <input
-                          type="text"
-                          required
-                          value={dest}
-                          onChange={(e) => setDest(e.target.value)}
-                          className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="text-xs text-slate-400 block mb-1">SNI (Server Name)</label>
-                        <input
-                          type="text"
-                          required
-                          value={serverName}
-                          onChange={(e) => setServerName(e.target.value)}
-                          className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <label className="text-xs text-slate-400">Private Key</label>
-                          <button
-                            type="button"
-                            onClick={generateRealityKeys}
-                            className="text-[10px] text-indigo-400 hover:text-indigo-300 flex items-center space-x-1"
-                          >
-                            <RefreshCw className={`w-3 h-3 ${genKeyLoading ? 'animate-spin' : ''}`} />
-                            <span>Gen Keys</span>
-                          </button>
-                        </div>
-                        <input
-                          type="text"
-                          required
-                          value={privateKey}
-                          onChange={(e) => setPrivateKey(e.target.value)}
-                          className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="text-xs text-slate-400 block mb-1">Public Key (Client Share)</label>
-                        <input
-                          type="text"
-                          value={publicKey}
-                          onChange={(e) => setPublicKey(e.target.value)}
-                          className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <div className="flex items-center justify-between mb-1">
-                          <label className="text-xs text-slate-400">Short ID</label>
-                          <button
-                            type="button"
-                            onClick={() => setShortId(generatePassword(4))}
-                            className="text-[10px] text-indigo-400 hover:text-indigo-300"
-                          >
-                            New ShortID
-                          </button>
-                        </div>
-                        <input
-                          type="text"
-                          value={shortId}
-                          onChange={(e) => setShortId(e.target.value)}
-                          className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="text-xs text-slate-400 block mb-1">uTLS Fingerprint</label>
-                        <select
-                          value={fingerprint}
-                          onChange={(e) => setFingerprint(e.target.value)}
-                          className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"
-                        >
-                          <option value="chrome">Chrome (Recommended)</option>
-                          <option value="firefox">Firefox</option>
-                          <option value="safari">Safari</option>
-                          <option value="ios">iOS</option>
-                          <option value="random">Randomized</option>
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {security === 'tls' && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-                    <div>
-                      <label className="text-xs text-slate-400 block mb-1">SNI / Domain</label>
-                      <input
-                        type="text"
-                        value={serverName}
-                        onChange={(e) => setServerName(e.target.value)}
-                        placeholder="example.com or server IP"
-                        className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-slate-400 block mb-1">ALPN</label>
-                      <input
-                        type="text"
-                        value={alpn}
-                        onChange={(e) => setAlpn(e.target.value)}
-                        placeholder="h2,http/1.1"
-                        className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
+              )}
 
               {/* 3. Transport Network */}
               {['vless', 'vmess', 'trojan'].includes(selectedProtocol) && (
@@ -729,10 +955,10 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
                       </select>
                     </div>
 
-                    {transport === 'ws' && (
+                    {(transport === 'ws' || transport === 'httpupgrade') && (
                       <>
                         <div>
-                          <label className="text-xs text-slate-400 block mb-1">WS Path</label>
+                          <label className="text-xs text-slate-400 block mb-1">Path</label>
                           <input
                             type="text"
                             value={wsPath}
@@ -741,7 +967,7 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
                           />
                         </div>
                         <div>
-                          <label className="text-xs text-slate-400 block mb-1">WS Host Header</label>
+                          <label className="text-xs text-slate-400 block mb-1">Host Header</label>
                           <input
                             type="text"
                             value={wsHost}
@@ -760,7 +986,7 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
                           type="text"
                           value={grpcServiceName}
                           onChange={(e) => setGrpcServiceName(e.target.value)}
-                          placeholder="grpc-service"
+                          placeholder="grpc"
                           className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
                         />
                       </div>
@@ -787,7 +1013,7 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
                           className="text-[10px] text-purple-400 hover:text-purple-300 flex items-center gap-1 font-medium transition"
                         >
                           <Radar className="w-2.5 h-2.5" />
-                          <span>⚡ Find Ideal SNI</span>
+                          <span>Find Ideal SNI</span>
                         </Link>
                       </div>
                       <input
@@ -825,7 +1051,7 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
                       <label className="text-xs text-slate-400 block mb-1">Detoured Shadowsocks Cipher</label>
                       <select
                         value={ssMethod}
-                        onChange={(e) => setSsMethod(e.target.value)}
+                        onChange={(e) => handleSsMethodChange(e.target.value)}
                         className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-purple-500"
                       >
                         {ssMethods.map((m) => (
@@ -836,10 +1062,10 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
 
                     <div>
                       <div className="flex items-center justify-between mb-1">
-                        <label className="text-xs text-slate-400">Detoured Shadowsocks Key (Base64)</label>
+                        <label className="text-xs text-slate-400">Detoured Shadowsocks Key</label>
                         <button
                           type="button"
-                          onClick={() => setSsPassword(generateBase64Key(16))}
+                          onClick={() => setSsPassword(generateSsKeyForMethod(ssMethod))}
                           className="text-[10px] text-indigo-400 hover:text-indigo-300 flex items-center space-x-1"
                         >
                           <RefreshCw className="w-2.5 h-2.5" />
@@ -850,7 +1076,7 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
                         type="text"
                         value={ssPassword}
                         onChange={(e) => setSsPassword(e.target.value)}
-                        placeholder="Base64 16-byte key"
+                        placeholder="Base64 key"
                         className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-purple-500"
                       />
                     </div>
@@ -870,7 +1096,7 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
                       <label className="text-xs text-slate-400 block mb-1">Method / Cipher</label>
                       <select
                         value={ssMethod}
-                        onChange={(e) => setSsMethod(e.target.value)}
+                        onChange={(e) => handleSsMethodChange(e.target.value)}
                         className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
                       >
                         {ssMethods.map((m) => (
@@ -881,10 +1107,14 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
 
                     <div>
                       <div className="flex items-center justify-between mb-1">
-                        <label className="text-xs text-slate-400">Password / Key</label>
+                        <label className="text-xs text-slate-400">
+                          {ssMethod.startsWith('2022-')
+                            ? `Server Key (${ssMethod.includes('256') ? '32-byte' : '16-byte'} Base64)`
+                            : 'Password / Key'}
+                        </label>
                         <button
                           type="button"
-                          onClick={() => setPassword(generatePassword(16))}
+                          onClick={() => setSsPassword(generateSsKeyForMethod(ssMethod))}
                           className="text-[10px] text-indigo-400 hover:text-indigo-300"
                         >
                           Gen
@@ -892,8 +1122,9 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
                       </div>
                       <input
                         type="text"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
+                        required
+                        value={ssPassword}
+                        onChange={(e) => setSsPassword(e.target.value)}
                         className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
                       />
                     </div>
@@ -1007,66 +1238,7 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
                   </div>
 
                   {/* 3. TLS Certificates & SNI */}
-                  <div className="p-3 bg-[#1a1d27] border border-[#2d3148] rounded-xl space-y-2">
-                    <label className="text-xs font-medium text-slate-200 block">TLS Certificate & Server Domain</label>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleCertPresetChange('settings')}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition ${
-                          certPreset === 'settings'
-                            ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/50'
-                            : 'bg-slate-800 text-slate-400 border-slate-700'
-                        }`}
-                      >
-                        Panel Settings Cert
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleCertPresetChange('letsencrypt')}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition ${
-                          certPreset === 'letsencrypt'
-                            ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/50'
-                            : 'bg-slate-800 text-slate-400 border-slate-700'
-                        }`}
-                      >
-                        Let's Encrypt Default
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleCertPresetChange('custom')}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition ${
-                          certPreset === 'custom'
-                            ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/50'
-                            : 'bg-slate-800 text-slate-400 border-slate-700'
-                        }`}
-                      >
-                        Custom Paths
-                      </button>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                      <div>
-                        <label className="text-xs text-slate-400 block mb-1">SNI (Server Name)</label>
-                        <input
-                          type="text"
-                          required
-                          value={serverName}
-                          onChange={(e) => setServerName(e.target.value)}
-                          className="w-full bg-[#14161f] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs text-slate-400 block mb-1">ALPN Protocol</label>
-                        <input
-                          type="text"
-                          value={alpn}
-                          onChange={(e) => setAlpn(e.target.value)}
-                          className="w-full bg-[#14161f] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
-                        />
-                      </div>
-                    </div>
-                  </div>
+                  {renderTlsCertSection('border-[#2d3148]')}
 
                   {/* 4. Bandwidth limits */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1085,6 +1257,73 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
                         type="number"
                         value={downMbps}
                         onChange={(e) => setDownMbps(e.target.value)}
+                        className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {selectedProtocol === 'tuic' && (
+                <div className="bg-[#14161f] border border-indigo-500/30 rounded-xl p-4 space-y-3">
+                  <div className="flex items-center space-x-2 text-xs font-semibold text-indigo-300 uppercase tracking-wider">
+                    <Zap className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>TUIC v5 Configuration</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs text-slate-400 block mb-1">Congestion Control</label>
+                      <select
+                        value={tuicCongestion}
+                        onChange={(e) => setTuicCongestion(e.target.value)}
+                        className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+                      >
+                        <option value="bbr">BBR (Recommended)</option>
+                        <option value="cubic">CUBIC</option>
+                        <option value="new_reno">New Reno</option>
+                      </select>
+                    </div>
+                    <div className="flex items-center space-x-2 pt-5">
+                      <input
+                        type="checkbox"
+                        id="tuicZeroRtt"
+                        checked={tuicZeroRtt}
+                        onChange={(e) => setTuicZeroRtt(e.target.checked)}
+                        className="rounded bg-[#1a1d27] border-[#2d3148] text-indigo-600 focus:ring-0"
+                      />
+                      <label htmlFor="tuicZeroRtt" className="text-xs text-slate-300">Enable 0-RTT Handshake</label>
+                    </div>
+                  </div>
+
+                  {renderTlsCertSection('border-[#2d3148]')}
+                </div>
+              )}
+
+              {selectedProtocol === 'wireguard' && (
+                <div className="bg-[#14161f] border border-[#2d3148] rounded-xl p-4 space-y-3">
+                  <div className="flex items-center space-x-2 text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                    <Shield className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>WireGuard Parameters</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs text-slate-400 block mb-1">Local Interface Address</label>
+                      <input
+                        type="text"
+                        value={wgLocalAddr}
+                        onChange={(e) => setWgLocalAddr(e.target.value)}
+                        placeholder="10.0.0.1/24"
+                        className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-slate-400 block mb-1">Peer Public Key (Optional)</label>
+                      <input
+                        type="text"
+                        value={wgPeerPubKey}
+                        onChange={(e) => setWgPeerPubKey(e.target.value)}
+                        placeholder="Base64 peer public key"
                         className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
                       />
                     </div>
@@ -1114,26 +1353,46 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
                   <div>
                     <div className="flex items-center justify-between mb-1">
                       <label className="text-xs text-slate-400">
-                        {selectedProtocol === 'hysteria2' ? 'Client Auth Password' : 'UUID / Key'}
+                        {selectedProtocol === 'hysteria2'
+                          ? 'Client Auth Password'
+                          : (selectedProtocol === 'shadowsocks'
+                              ? 'Client Key (Base64 / Password)'
+                              : (selectedProtocol === 'shadowtls' ? 'Client ShadowTLS Password' : 'UUID / Key'))}
                       </label>
                       <button
                         type="button"
                         onClick={() => {
                           setClientUuid(generateUUID())
                           setClientAuth(generatePassword(16))
+                          if (selectedProtocol === 'shadowsocks') {
+                            setSsPassword(generateSsKeyForMethod(ssMethod))
+                          }
+                          if (selectedProtocol === 'shadowtls') {
+                            setShadowtlsPassword(generateHexPassword(16))
+                          }
                         }}
                         className="text-[10px] text-indigo-400 hover:text-indigo-300"
                       >
-                        {selectedProtocol === 'hysteria2' ? 'Gen Auth' : 'New UUID'}
+                        {selectedProtocol === 'hysteria2' ? 'Gen Auth' : 'Regen'}
                       </button>
                     </div>
                     <input
                       type="text"
                       required
-                      value={selectedProtocol === 'hysteria2' ? clientAuth : clientUuid}
+                      value={
+                        selectedProtocol === 'hysteria2'
+                          ? clientAuth
+                          : (selectedProtocol === 'shadowsocks'
+                              ? ssPassword
+                              : (selectedProtocol === 'shadowtls' ? shadowtlsPassword : clientUuid))
+                      }
                       onChange={(e) => {
                         if (selectedProtocol === 'hysteria2') {
                           setClientAuth(e.target.value)
+                        } else if (selectedProtocol === 'shadowsocks') {
+                          setSsPassword(e.target.value)
+                        } else if (selectedProtocol === 'shadowtls') {
+                          setShadowtlsPassword(e.target.value)
                         } else {
                           setClientUuid(e.target.value)
                         }
@@ -1143,7 +1402,7 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
                   </div>
                 </div>
 
-                {selectedProtocol === 'vless' && (
+                {selectedProtocol === 'vless' && security === 'reality' && transport === 'tcp' && (
                   <div>
                     <label className="text-xs text-slate-400 block mb-1">Flow Control</label>
                     <select

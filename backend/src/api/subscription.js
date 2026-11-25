@@ -84,7 +84,7 @@ async function handleSubscription(req, res, token) {
   for (const c of clients) {
     if (c.enable === 0 || c.sub_revoked === 1) continue;
     const inb = Inbound.findById(c.inbound_id);
-    if (!inb || inb.enable === 0) continue;
+    if (!inb || !inb.enabled) continue;
 
     // Check expiry
     const expiry = parseInt(c.expiry_time || 0, 10);

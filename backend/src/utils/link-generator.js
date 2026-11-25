@@ -82,7 +82,9 @@ function extractHysteriaDetails(inbound, settings, streamSettings, host) {
   // 5. Insecure / Skip cert verify (default to false, H4)
   const insecure = streamSettings.insecure !== undefined
     ? Boolean(streamSettings.insecure)
-    : (settings.insecure !== undefined ? Boolean(settings.insecure) : false);
+    : (settings.insecure !== undefined
+        ? Boolean(settings.insecure)
+        : Boolean(streamSettings.tlsSettings?.allowInsecure));
 
   // 6. Up / Down speed
   const upMbps = settings.up_mbps || streamSettings.up_mbps || 100;
@@ -177,6 +179,9 @@ function generateClientLink(inbound, client, host) {
       if (alpnVal) {
         params.set('alpn', Array.isArray(alpnVal) ? alpnVal.join(',') : alpnVal);
       }
+      if (streamSettings.insecure || settings.insecure || streamSettings.tlsSettings?.allowInsecure) {
+        params.set('allowInsecure', '1');
+      }
     } else {
       params.set('security', 'none');
     }
@@ -224,13 +229,18 @@ function generateClientLink(inbound, client, host) {
     params.set('security', 'tls');
     params.set('sni', streamSettings.tlsSettings?.serverName || streamSettings.serverName || settings.serverName || host);
     params.set('type', streamSettings.network || 'tcp');
+    if (streamSettings.insecure || settings.insecure || streamSettings.tlsSettings?.allowInsecure) {
+      params.set('allowInsecure', '1');
+    }
 
     if (streamSettings.network === 'ws') {
       params.set('path', streamSettings.wsSettings?.path || streamSettings.wsPath || '/');
       params.set('host', streamSettings.wsSettings?.headers?.Host || streamSettings.wsHost || host);
+    } else if (streamSettings.network === 'grpc') {
+      params.set('serviceName', streamSettings.grpcSettings?.serviceName || streamSettings.grpcServiceName || '');
     }
 
-    return `trojan://${password}@${host}:${port}?${params.toString()}#${urlEncode(remark)}`;
+    return `trojan://${encodeURIComponent(password)}@${host}:${port}?${params.toString()}#${urlEncode(remark)}`;
   }
 
   // 6. Hysteria 2 (Full anti-censorship parameters for Russia/China)
@@ -250,7 +260,7 @@ function generateClientLink(inbound, client, host) {
       params.set('mport', hy2.ports);
     }
 
-    return `hy2://${auth}@${host}:${port}/?${params.toString()}#${urlEncode(remark)}`;
+    return `hy2://${encodeURIComponent(auth)}@${host}:${port}/?${params.toString()}#${urlEncode(remark)}`;
   }
 
   // 7. TUIC
@@ -336,17 +346,30 @@ function generateClashProxy(inbound, client, host) {
         'client-fingerprint': 'chrome',
       };
     } else {
+      const net = streamSettings.network || 'tcp';
+      const isTls = streamSettings.security === 'tls' || settings.tls || Boolean(streamSettings.tlsSettings);
+      const insecure = Boolean(streamSettings.insecure || settings.insecure || streamSettings.tlsSettings?.allowInsecure || false);
       proxyObj = {
         name: remark,
         type: 'vless',
         server: host,
         port,
         uuid,
-        network: streamSettings.network || 'tcp',
-        tls: streamSettings.security === 'tls',
+        network: net,
+        tls: isTls,
         udp: true,
-        servername: sni,
+        ...(isTls ? { servername: sni, 'skip-cert-verify': insecure } : {}),
       };
+      if (net === 'ws') {
+        proxyObj['ws-opts'] = {
+          path: streamSettings.wsSettings?.path || streamSettings.wsPath || '/',
+          headers: { Host: streamSettings.wsSettings?.headers?.Host || streamSettings.wsHost || host },
+        };
+      } else if (net === 'grpc') {
+        proxyObj['grpc-opts'] = {
+          'grpc-service-name': streamSettings.grpcSettings?.serviceName || streamSettings.grpcServiceName || '',
+        };
+      }
     }
   }
 
@@ -627,15 +650,34 @@ function generateSingboxConfig(inbound, client, host) {
     return JSON.stringify({ outbounds }, null, 2);
   }
 
-  // VLESS Reality
+  // VLESS Reality / TLS / Plain
   if (type === 'vless' || protocol === 'vless') {
     const uuid = client.uuid || '';
     const isReality = streamSettings.security === 'reality' || settings.reality || Boolean(streamSettings.realitySettings);
+    const isTls = isReality || streamSettings.security === 'tls' || settings.tls || Boolean(streamSettings.tlsSettings);
     const realSettings = streamSettings.realitySettings || {};
-    const sni = streamSettings.serverName || settings.serverName || (realSettings.serverNames?.[0]) || host;
+    const sni = streamSettings.tlsSettings?.serverName || streamSettings.serverName || settings.serverName || (realSettings.serverNames?.[0]) || host;
     const publicKey = streamSettings.publicKey || settings.publicKey || realSettings.publicKey || '';
     const shortId = streamSettings.shortId || settings.shortId || (realSettings.shortIds?.[0]) || '';
     const flow = client.flow || (isReality ? 'xtls-rprx-vision' : '');
+    const net = streamSettings.network || 'tcp';
+    const insecure = Boolean(streamSettings.insecure || settings.insecure || streamSettings.tlsSettings?.allowInsecure || false);
+
+    let transport;
+    if (net === 'ws') {
+      transport = {
+        type: 'ws',
+        path: streamSettings.wsSettings?.path || streamSettings.wsPath || '/',
+        headers: (streamSettings.wsSettings?.headers?.Host || streamSettings.wsHost)
+          ? { Host: streamSettings.wsSettings?.headers?.Host || streamSettings.wsHost }
+          : undefined,
+      };
+    } else if (net === 'grpc') {
+      transport = {
+        type: 'grpc',
+        service_name: streamSettings.grpcSettings?.serviceName || streamSettings.grpcServiceName || 'grpc',
+      };
+    }
 
     const outbounds = [
       {
@@ -644,21 +686,30 @@ function generateSingboxConfig(inbound, client, host) {
         server: host,
         server_port: port,
         uuid: uuid,
-        flow: flow,
-        network: 'tcp',
-        tls: {
-          enabled: true,
-          server_name: sni,
-          reality: isReality ? {
-            enabled: true,
-            public_key: publicKey,
-            short_id: shortId,
-          } : undefined,
-          utls: {
-            enabled: true,
-            fingerprint: 'chrome',
-          },
-        },
+        ...(flow && net === 'tcp' ? { flow } : {}),
+        ...(transport ? { transport } : {}),
+        ...(isTls
+          ? {
+              tls: {
+                enabled: true,
+                server_name: sni,
+                ...(!isReality && insecure ? { insecure: true } : {}),
+                ...(isReality
+                  ? {
+                      reality: {
+                        enabled: true,
+                        public_key: publicKey,
+                        short_id: shortId,
+                      },
+                    }
+                  : {}),
+                utls: {
+                  enabled: true,
+                  fingerprint: 'chrome',
+                },
+              },
+            }
+          : {}),
       },
     ];
 
@@ -669,6 +720,9 @@ function generateSingboxConfig(inbound, client, host) {
   if (type === 'hysteria2' || protocol === 'hysteria2' || type === 'hysteria' || protocol === 'hysteria') {
     const auth = client.password || client.auth || settings.auth || settings.password || '';
     const hy2 = extractHysteriaDetails(inbound, settings, streamSettings, host);
+    const serverPorts = hy2.ports
+      ? String(hy2.ports).split(',').map((p) => p.trim().replace(/-/g, ':')).filter(Boolean)
+      : [];
 
     const outbounds = [
       {
@@ -676,7 +730,7 @@ function generateSingboxConfig(inbound, client, host) {
         tag: remark,
         server: host,
         server_port: port,
-        ...(hy2.ports ? { server_ports: hy2.ports, hop_interval: `${hy2.hopInterval || 30}s` } : {}),
+        ...(serverPorts.length > 0 ? { server_ports: serverPorts, hop_interval: `${hy2.hopInterval || 30}s` } : {}),
         up_mbps: hy2.upMbps || 100,
         down_mbps: hy2.downMbps || 100,
         password: auth,

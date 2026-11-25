@@ -109,6 +109,7 @@ export default function ClientModal({ isOpen, onClose, inbound, onUpdate }) {
           link: createdClient.link,
           clashYaml: createdClient.clashYaml,
           singboxJson: createdClient.singboxJson,
+          hy2Config: createdClient.hy2Config,
           client: createdClient,
         })
         toast.success(`Client "${newEmail}" added successfully`)
@@ -155,6 +156,7 @@ export default function ClientModal({ isOpen, onClose, inbound, onUpdate }) {
         link: data.link,
         clashYaml: data.clashYaml,
         singboxJson: data.singboxJson,
+        hy2Config: data.hy2Config,
         client: { ...data, ...(client.subUrl ? { subUrl: client.subUrl } : {}) },
       })
     } catch (err) {
@@ -514,6 +516,7 @@ export default function ClientModal({ isOpen, onClose, inbound, onUpdate }) {
           link={activeQR.link}
           clashYaml={activeQR.clashYaml}
           singboxJson={activeQR.singboxJson}
+          hy2Config={activeQR.hy2Config}
           inbound={inbound}
           client={activeQR.client}
         />

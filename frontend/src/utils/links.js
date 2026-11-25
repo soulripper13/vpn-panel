@@ -99,7 +99,11 @@ export function extractHysteriaDetails(inbound, settings, streamSettings, host) 
   const isIpSni = /^(\d{1,3}\.){3}\d{1,3}$/.test(sni)
   const insecure = streamSettings?.insecure !== undefined
     ? Boolean(streamSettings.insecure)
-    : (settings?.insecure !== undefined ? Boolean(settings.insecure) : isIpSni)
+    : (settings?.insecure !== undefined
+        ? Boolean(settings.insecure)
+        : (streamSettings?.tlsSettings?.allowInsecure !== undefined
+            ? Boolean(streamSettings.tlsSettings.allowInsecure)
+            : isIpSni))
 
   // 6. Up / Down speed
   const upMbps = settings?.up_mbps || streamSettings?.up_mbps || 100
@@ -205,7 +209,7 @@ export function generateTrojanLink({ password, host, port, sni, remark }) {
 /**
  * Generate Hysteria2 share link
  */
-export function generateHy2Link({ password, host, port, sni, alpn = 'h3', obfsPassword, ports, insecure = true, remark }) {
+export function generateHy2Link({ password, host, port, sni, alpn = 'h3', obfsPassword, ports, insecure = false, remark }) {
   const params = new URLSearchParams()
   if (sni) params.set('sni', sni)
   if (alpn) params.set('alpn', alpn)
@@ -217,7 +221,7 @@ export function generateHy2Link({ password, host, port, sni, alpn = 'h3', obfsPa
   if (ports) {
     params.set('mport', ports)
   }
-  return `hy2://${password}@${host}:${port}/?${params.toString()}#${encodeURIComponent(remark || 'VPN')}`
+  return `hy2://${encodeURIComponent(password)}@${host}:${port}/?${params.toString()}#${encodeURIComponent(remark || 'VPN')}`
 }
 
 /**
@@ -340,6 +344,7 @@ export function generateClashYaml(inbound, client, host) {
   if (type === 'trojan' || protocol === 'trojan') {
     const password = client?.password || settings.password || ''
     const sni = streamSettings.tlsSettings?.serverName || streamSettings.serverName || settings.serverName || host
+    const insecure = Boolean(streamSettings.tlsSettings?.allowInsecure || streamSettings.insecure || settings.allowInsecure || false)
     return `proxies:
   - name: "${remark}"
     type: trojan
@@ -347,7 +352,7 @@ export function generateClashYaml(inbound, client, host) {
     port: ${port}
     password: "${password}"
     sni: "${sni}"
-    skip-cert-verify: true`
+    skip-cert-verify: ${insecure ? 'true' : 'false'}`
   }
 
   if (type === 'shadowsocks' || protocol === 'shadowsocks') {
@@ -455,6 +460,9 @@ export function generateSingboxJson(inbound, client, host) {
   if (type === 'hysteria2' || protocol === 'hysteria2' || type === 'hysteria' || protocol === 'hysteria') {
     const auth = client?.password || client?.auth || settings.auth || settings.password || ''
     const hy2 = extractHysteriaDetails(inbound, settings, streamSettings, host)
+    const serverPorts = hy2.ports
+      ? String(hy2.ports).split(',').map((p) => p.trim().replace(/-/g, ':')).filter(Boolean)
+      : []
 
     const outbounds = [
       {
@@ -462,7 +470,7 @@ export function generateSingboxJson(inbound, client, host) {
         tag: remark,
         server: host,
         server_port: port,
-        ...(hy2.ports ? { server_ports: hy2.ports, hop_interval: `${hy2.hopInterval || 30}s` } : {}),
+        ...(serverPorts.length > 0 ? { server_ports: serverPorts, hop_interval: `${hy2.hopInterval || 30}s` } : {}),
         up_mbps: hy2.upMbps || 100,
         down_mbps: hy2.downMbps || 100,
         password: auth,

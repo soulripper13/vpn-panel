@@ -15,7 +15,14 @@ const Inbound = require('../src/models/Inbound');
 const Client = require('../src/models/Client');
 const SingboxService = require('../src/services/singbox');
 const XrayService = require('../src/services/xray');
-const { generateClashProxy, generateClashSubscription } = require('../src/utils/link-generator');
+const { generateSingboxInbound, generateXrayInbound } = require('../src/utils/config-generator');
+const {
+  generateClientLink,
+  generateClashProxy,
+  generateClashSubscription,
+  generateSingboxConfig,
+} = require('../src/utils/link-generator');
+const { getCertStorageDir } = require('../src/utils/tls-certs');
 
 test('Engines: Reality X25519 key generation produces valid Curve25519 keys (M5)', () => {
   const keyPair = crypto.generateKeyPairSync('x25519');
@@ -185,8 +192,139 @@ test('Shadow-TLS: Clash proxy has udp: false and sing-box client has correct det
   assert.equal(stlsOut.detour, undefined, 'Shadowtls client outbound must NOT detour back to shadowsocks');
 });
 
+test('Hysteria2 with camouflage SNI gateway.icloud.com auto-generates self-signed cert and valid client exports', () => {
+  const sni = 'gateway.icloud.com';
+  const sbInb = generateSingboxInbound('hysteria2', {
+    tag: 'hy2-ru-test',
+    port: 8443,
+    serverName: sni,
+    obfsPassword: 'obfs-secret-pass',
+    certMode: 'selfsigned',
+    users: [{ email: 'ru-user', password: 'hy2-auth-password' }],
+  });
+
+  assert.equal(sbInb.type, 'hysteria2');
+  assert.equal(sbInb.tls.enabled, true);
+  assert.equal(sbInb.tls.server_name, sni);
+  assert.deepEqual(sbInb.tls.alpn, ['h3']);
+  assert.ok(sbInb.tls.certificate_path && fs.existsSync(sbInb.tls.certificate_path), 'sing-box cert file must exist');
+  assert.ok(sbInb.tls.key_path && fs.existsSync(sbInb.tls.key_path), 'sing-box key file must exist');
+
+  const xrInb = generateXrayInbound('hysteria2', {
+    tag: 'xray-hy2-ru-test',
+    port: 8444,
+    serverName: sni,
+    obfsPassword: 'obfs-secret-pass',
+    certMode: 'selfsigned',
+    clients: [{ email: 'ru-user', password: 'hy2-auth-password' }],
+  });
+
+  assert.equal(xrInb.protocol, 'hysteria');
+  assert.equal(xrInb.streamSettings.security, 'tls');
+  assert.equal(xrInb.streamSettings.tlsSettings.serverName, sni);
+  assert.deepEqual(xrInb.streamSettings.tlsSettings.alpn, ['h3']);
+  assert.ok(fs.existsSync(xrInb.streamSettings.tlsSettings.certificates[0].certificateFile), 'xray cert file must exist');
+  assert.ok(fs.existsSync(xrInb.streamSettings.tlsSettings.certificates[0].keyFile), 'xray key file must exist');
+
+  // Verify client exports honor insecure=true and sing-box server_ports array format
+  const inboundRecord = {
+    type: 'hysteria2',
+    protocol: 'hysteria2',
+    port: 8443,
+    remark: 'RU-Hy2',
+    settings: {
+      serverName: sni,
+      obfsPassword: 'obfs-secret-pass',
+      ports: '20000-50000',
+      hopInterval: '5-10',
+      insecure: true,
+    },
+    stream_settings: {
+      network: 'hysteria',
+      security: 'tls',
+      serverName: sni,
+      obfsPassword: 'obfs-secret-pass',
+      ports: '20000-50000',
+      insecure: true,
+    },
+  };
+  const client = { password: 'hy2-auth-password', email: 'ru-user' };
+
+  const uri = generateClientLink(inboundRecord, client, '1.2.3.4');
+  assert.ok(uri.startsWith('hy2://hy2-auth-password@1.2.3.4:8443/?'));
+  assert.ok(uri.includes('sni=gateway.icloud.com'));
+  assert.ok(uri.includes('insecure=1'));
+  assert.ok(uri.includes('mport=20000-50000'));
+
+  const clash = generateClashProxy(inboundRecord, client, '1.2.3.4');
+  assert.equal(clash.obj['skip-cert-verify'], true);
+  assert.equal(clash.obj.sni, sni);
+
+  const sbClient = JSON.parse(generateSingboxConfig(inboundRecord, client, '1.2.3.4'));
+  assert.deepEqual(sbClient.outbounds[0].server_ports, ['20000:50000']);
+  assert.equal(sbClient.outbounds[0].tls.insecure, true);
+  assert.equal(sbClient.outbounds[0].tls.server_name, sni);
+});
+
+test('Xray & sing-box normalize UI stream_settings for VLESS/VMess/Trojan and WireGuard', () => {
+  // 1. Xray VLESS TLS without streamSettings object must not throw
+  const xrVlessTls = generateXrayInbound('vless', {
+    port: 443,
+    security: 'tls',
+    transport: 'ws',
+    wsPath: '/ws-path',
+    wsHost: 'cdn.example.com',
+    serverName: 'cdn.example.com',
+    certMode: 'selfsigned',
+    clients: [{ uuid: '11111111-1111-1111-1111-111111111111', email: 'u1' }],
+  });
+  assert.equal(xrVlessTls.streamSettings.network, 'ws');
+  assert.equal(xrVlessTls.streamSettings.wsSettings.path, '/ws-path');
+  assert.equal(xrVlessTls.streamSettings.wsSettings.headers.Host, 'cdn.example.com');
+  assert.equal(xrVlessTls.streamSettings.security, 'tls');
+  assert.ok(xrVlessTls.streamSettings.tlsSettings.certificates[0].certificateFile);
+
+  // 2. Xray VMess with flat UI stream_settings must build proper wsSettings & tlsSettings
+  const xrVmess = generateXrayInbound('vmess', {
+    port: 8080,
+    streamSettings: {
+      network: 'ws',
+      security: 'tls',
+      wsPath: '/vmess-ws',
+      wsHost: 'ws.example.com',
+      serverName: 'ws.example.com',
+      certMode: 'selfsigned',
+      ports: '20000-50000', // stale UI field must not leak into Xray config
+    },
+    clients: [{ uuid: '11111111-1111-1111-1111-111111111111', email: 'vm1' }],
+  });
+  assert.equal(xrVmess.streamSettings.wsSettings.path, '/vmess-ws');
+  assert.equal(xrVmess.streamSettings.ports, undefined);
+  assert.equal(xrVmess.streamSettings.security, 'tls');
+  assert.ok(xrVmess.streamSettings.tlsSettings.certificates[0].certificateFile);
+
+  // 3. sing-box VLESS over WS must not set xtls-rprx-vision flow
+  const sbVlessWs = generateSingboxInbound('vless', {
+    port: 2053,
+    transport: 'ws',
+    wsPath: '/vless',
+    security: 'tls',
+    serverName: 'example.com',
+    certMode: 'selfsigned',
+    users: [{ uuid: '11111111-1111-1111-1111-111111111111', flow: 'xtls-rprx-vision', email: 'u2' }],
+  });
+  assert.equal(sbVlessWs.users[0].flow, undefined);
+  assert.equal(sbVlessWs.transport.type, 'ws');
+
+  // 4. sing-box WireGuard generates valid base64 private_key and local_address
+  const sbWg = generateSingboxInbound('wireguard', { port: 51820 });
+  assert.ok(sbWg.private_key && Buffer.from(sbWg.private_key, 'base64').length === 32);
+  assert.deepEqual(sbWg.local_address, ['10.0.0.1/24']);
+});
+
 test.after(() => {
   try { fs.unlinkSync(testDbPath); } catch {}
   try { fs.unlinkSync(`${testDbPath}-wal`); } catch {}
   try { fs.unlinkSync(`${testDbPath}-shm`); } catch {}
+  try { fs.rmSync(getCertStorageDir(), { recursive: true, force: true }); } catch {}
 });

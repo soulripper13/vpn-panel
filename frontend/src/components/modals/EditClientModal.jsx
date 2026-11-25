@@ -1,14 +1,9 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
   X,
   Check,
   User,
-  Key,
   RefreshCw,
-  Zap,
-  Shield,
-  Clock,
-  HardDrive,
   Sliders,
 } from 'lucide-react'
 import { generateUUID, generatePassword, generateHexPassword } from '../../utils/links'
@@ -18,24 +13,47 @@ import Spinner from '../ui/Spinner'
 import Toggle from '../ui/Toggle'
 
 export default function EditClientModal({ isOpen, onClose, client, inbound, onSuccess }) {
-  if (!isOpen || !client) return null
+  const [loading, setLoading] = useState(false)
+  const [email, setEmail] = useState('')
+  const [remark, setRemark] = useState('')
+  const [uuid, setUuid] = useState('')
+  const [password, setPassword] = useState('')
+  const [flow, setFlow] = useState('')
+  const [limitGb, setLimitGb] = useState(0)
+  const [expiryDays, setExpiryDays] = useState(0)
+  const [enable, setEnable] = useState(true)
 
-  const inboundId = client.inbound_id || inbound?.id
-  const protocol = (inbound?.protocol || inbound?.type || client.inboundProtocol || '').toLowerCase()
+  const inboundId = client?.inbound_id || client?.inboundId || inbound?.id
+  const protocol = (inbound?.protocol || inbound?.type || client?.inboundProtocol || '').toLowerCase()
   const isVlessOrVmess = protocol === 'vless' || protocol === 'vmess'
   const isShadowtls = protocol === 'shadowtls'
 
-  const [loading, setLoading] = useState(false)
-  const [email, setEmail] = useState(client.email || '')
-  const [remark, setRemark] = useState(client.remark || '')
-  const [uuid, setUuid] = useState(client.uuid || '')
-  const [password, setPassword] = useState(client.password || '')
-  const [flow, setFlow] = useState(client.flow || '')
-  const [limitGb, setLimitGb] = useState(
-    client.total_bytes_limit ? Math.round(client.total_bytes_limit / (1024 * 1024 * 1024)) : 0
-  )
-  const [expiryDays, setExpiryDays] = useState(0)
-  const [enable, setEnable] = useState(client.enable === 1 || client.enable === true)
+  useEffect(() => {
+    if (!isOpen || !client) return
+    setEmail(client.email || '')
+    setRemark(client.remark || '')
+    setUuid(client.uuid || '')
+    setPassword(client.password || '')
+    setFlow(client.flow || '')
+    setLimitGb(client.total_bytes_limit ? Math.round(client.total_bytes_limit / (1024 * 1024 * 1024)) : 0)
+    setExpiryDays(0)
+    setEnable(client.enable === 1 || client.enable === true)
+
+    // Load unmasked credentials so editing remark/limits never overwrites secrets with masked placeholders
+    if (inboundId && client.id && (String(client.password || '').includes('••••') || String(client.uuid || '').includes('••••'))) {
+      api.post(`/inbounds/${inboundId}/clients/${client.id}/reveal`)
+        .then((res) => {
+          const revealed = res.data?.data
+          if (revealed) {
+            if (revealed.uuid) setUuid(revealed.uuid)
+            if (revealed.password) setPassword(revealed.password)
+          }
+        })
+        .catch(() => {})
+    }
+  }, [isOpen, client, inboundId])
+
+  if (!isOpen || !client) return null
 
   const handleSave = async (e) => {
     e.preventDefault()
@@ -46,11 +64,16 @@ export default function EditClientModal({ isOpen, onClose, client, inbound, onSu
       const payload = {
         email,
         remark,
-        uuid: uuid || client.uuid,
-        password: password || client.password,
         flow,
         total_bytes_limit: limitGb ? parseInt(limitGb, 10) * 1024 * 1024 * 1024 : 0,
         enable,
+      }
+
+      if (uuid && !String(uuid).includes('••••')) {
+        payload.uuid = uuid
+      }
+      if (password && !String(password).includes('••••')) {
+        payload.password = password
       }
 
       if (expiryDays) {
