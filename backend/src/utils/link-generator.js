@@ -119,7 +119,9 @@ function generateClientLink(inbound, client, host) {
   const protocol = (inbound.protocol || type).toLowerCase();
 
   // 1. ShadowTLS + Shadowsocks (or shadowsocks with shadow-tls plugin)
-  const isStls = type === 'shadowtls' || protocol === 'shadowtls' || settings.plugin === 'shadow-tls' || Boolean(settings.shadowtlsPassword);
+  const isStls = type === 'shadowtls' ||
+    protocol === 'shadowtls' ||
+    ((type === 'shadowsocks' || protocol === 'shadowsocks') && (settings.plugin === 'shadow-tls' || Boolean(settings.shadowtlsPassword)));
   if (isStls) {
     const stlsPassword = client.password || settings.shadowtlsPassword || settings.password || '';
     const sni = settings.serverName || settings.sni || 'gateway.icloud.com';
@@ -295,7 +297,11 @@ function generateClashProxy(inbound, client, host) {
   let proxyObj = null;
 
   // ShadowTLS (or Shadowsocks + shadow-tls plugin)
-  if (type === 'shadowtls' || protocol === 'shadowtls' || settings.plugin === 'shadow-tls' || Boolean(settings.shadowtlsPassword)) {
+  if (
+    type === 'shadowtls' ||
+    protocol === 'shadowtls' ||
+    ((type === 'shadowsocks' || protocol === 'shadowsocks') && (settings.plugin === 'shadow-tls' || Boolean(settings.shadowtlsPassword)))
+  ) {
     const stlsPassword = client.password || settings.shadowtlsPassword || settings.password || '';
     const sni = settings.serverName || settings.sni || 'gateway.icloud.com';
     const ssMethod = settings.ssMethod || settings.method || '2022-blake3-aes-128-gcm';
@@ -647,7 +653,11 @@ function generateSingboxConfig(inbound, client, host) {
   const protocol = (inbound.protocol || type).toLowerCase();
 
   // ShadowTLS (or Shadowsocks + shadow-tls plugin)
-  if (type === 'shadowtls' || protocol === 'shadowtls' || settings.plugin === 'shadow-tls' || Boolean(settings.shadowtlsPassword)) {
+  if (
+    type === 'shadowtls' ||
+    protocol === 'shadowtls' ||
+    ((type === 'shadowsocks' || protocol === 'shadowsocks') && (settings.plugin === 'shadow-tls' || Boolean(settings.shadowtlsPassword)))
+  ) {
     const stlsPassword = client.password || settings.shadowtlsPassword || settings.password || '';
     const sni = settings.serverName || settings.sni || 'gateway.icloud.com';
     const ssMethod = settings.ssMethod || settings.method || '2022-blake3-aes-128-gcm';

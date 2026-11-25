@@ -140,7 +140,7 @@ class Client {
         expiry_time       = @expiry_time,
         enable            = @enable,
         remark            = @remark
-      WHERE id = ?
+      WHERE id = @id
     `).run({ ...Client._coerce(merged), id });
   }
 

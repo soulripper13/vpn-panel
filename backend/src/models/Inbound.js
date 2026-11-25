@@ -84,7 +84,7 @@ class Inbound {
         total_bytes_limit    = @total_bytes_limit,
         expiry_time          = @expiry_time,
         remark               = @remark
-      WHERE id = ?
+      WHERE id = @id
     `).run({ ...Inbound._serialize(merged), id });
   }
 

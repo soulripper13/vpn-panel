@@ -62,8 +62,7 @@ export default function QRModal({
   const isShadowtls =
     type === 'shadowtls' ||
     protocol === 'shadowtls' ||
-    settings?.plugin === 'shadow-tls' ||
-    Boolean(settings?.shadowtlsPassword)
+    ((type === 'shadowsocks' || protocol === 'shadowsocks') && (settings?.plugin === 'shadow-tls' || Boolean(settings?.shadowtlsPassword)))
 
   // ShadowTLS parameters
   const stlsPassword = client?.password || settings?.shadowtlsPassword || settings?.password || ''

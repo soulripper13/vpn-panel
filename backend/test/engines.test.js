@@ -344,6 +344,72 @@ test('TUIC & Trojan Clash/Sing-box client exports include full credentials and T
   assert.equal(tuicSb.outbounds[0].tls.insecure, true);
 });
 
+test('Inbound.update and Client.update succeed when changing port/fields (named @id fix)', () => {
+  const { id: inbId } = Inbound.create({
+    engine: 'singbox',
+    tag: `update-test-${Date.now()}`,
+    type: 'hysteria2',
+    port: 19901,
+    remark: 'Before',
+  });
+  Inbound.update(inbId, { port: 19902, remark: 'After' });
+  const updatedInb = Inbound.findById(inbId);
+  assert.equal(updatedInb.port, 19902);
+  assert.equal(updatedInb.remark, 'After');
+
+  const { id: clientId } = Client.create({
+    inbound_id: inbId,
+    email: 'edit-client@test.com',
+    password: 'old-password',
+  });
+  Client.update(clientId, { password: 'new-password', remark: 'Updated' });
+  const updatedClient = Client.findById(clientId);
+  assert.equal(updatedClient.password, 'new-password');
+  assert.equal(updatedClient.remark, 'Updated');
+});
+
+test('Non-ShadowTLS protocols never emit ss:// or shadow-tls even if legacy settings contain shadowtlsPassword', () => {
+  const cases = [
+    { type: 'hysteria2', expectedPrefix: 'hy2://', expectedType: 'hysteria2' },
+    { type: 'vless', expectedPrefix: 'vless://', expectedType: 'vless' },
+    { type: 'vmess', expectedPrefix: 'vmess://', expectedType: 'vmess' },
+    { type: 'trojan', expectedPrefix: 'trojan://', expectedType: 'trojan' },
+    { type: 'tuic', expectedPrefix: 'tuic://', expectedType: 'tuic' },
+  ];
+
+  for (const tc of cases) {
+    const inbound = {
+      type: tc.type,
+      protocol: tc.type,
+      port: 14443,
+      remark: `${tc.type}-node`,
+      settings: {
+        shadowtlsPassword: 'stale-stls-password-from-old-modal',
+        ssMethod: '2022-blake3-aes-128-gcm',
+        ssPassword: 'stale-ss-password',
+        serverName: 'gateway.icloud.com',
+        insecure: true,
+      },
+      stream_settings: {
+        security: 'tls',
+        network: tc.type === 'vmess' ? 'ws' : 'tcp',
+        serverName: 'gateway.icloud.com',
+        insecure: true,
+      },
+    };
+    const client = { uuid: '11111111-1111-1111-1111-111111111111', password: 'user-pass', email: 'u1' };
+
+    const link = generateClientLink(inbound, client, '1.2.3.4');
+    assert.ok(link.startsWith(tc.expectedPrefix), `${tc.type} link must start with ${tc.expectedPrefix}, got ${link}`);
+
+    const clash = generateClashProxy(inbound, client, '1.2.3.4');
+    assert.equal(clash.obj.type, tc.expectedType, `${tc.type} Clash proxy must be ${tc.expectedType}`);
+
+    const sb = JSON.parse(generateSingboxConfig(inbound, client, '1.2.3.4'));
+    assert.equal(sb.outbounds[0].type, tc.expectedType, `${tc.type} Sing-box outbound must be ${tc.expectedType}`);
+  }
+});
+
 test.after(() => {
   try { fs.unlinkSync(testDbPath); } catch {}
   try { fs.unlinkSync(`${testDbPath}-wal`); } catch {}

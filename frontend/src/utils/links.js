@@ -260,7 +260,10 @@ export function generateClashYaml(inbound, client, host) {
   const type = (inbound.type || '').toLowerCase()
   const protocol = (inbound.protocol || type).toLowerCase()
 
-  const isStls = type === 'shadowtls' || protocol === 'shadowtls' || settings?.plugin === 'shadow-tls' || Boolean(settings?.shadowtlsPassword)
+  const isStls =
+    type === 'shadowtls' ||
+    protocol === 'shadowtls' ||
+    ((type === 'shadowsocks' || protocol === 'shadowsocks') && (settings?.plugin === 'shadow-tls' || Boolean(settings?.shadowtlsPassword)))
   if (isStls) {
     const stlsPassword = client?.password || settings.shadowtlsPassword || settings.password || ''
     const sni = settings.serverName || settings.sni || 'gateway.icloud.com'
@@ -367,6 +370,46 @@ export function generateClashYaml(inbound, client, host) {
     password: "${password}"`
   }
 
+  if (type === 'vmess' || protocol === 'vmess') {
+    const uuid = client?.uuid || ''
+    const isTls = streamSettings.security === 'tls'
+    const sni = isTls ? (streamSettings.tlsSettings?.serverName || streamSettings.serverName || host) : ''
+    const insecure = Boolean(streamSettings.insecure || settings.insecure || streamSettings.tlsSettings?.allowInsecure || false)
+    const net = streamSettings.network || 'ws'
+    const wsPath = streamSettings.wsSettings?.path || streamSettings.wsPath || '/'
+    const wsHost = streamSettings.wsSettings?.headers?.Host || streamSettings.wsHost || host
+    return `proxies:
+  - name: "${remark}"
+    type: vmess
+    server: ${host}
+    port: ${port}
+    uuid: "${uuid}"
+    alterId: 0
+    cipher: auto
+    udp: true${isTls ? `\n    tls: true\n    servername: "${sni}"\n    skip-cert-verify: ${insecure ? 'true' : 'false'}` : ''}${net === 'ws' ? `\n    network: ws\n    ws-opts:\n      path: "${wsPath}"\n      headers:\n        Host: "${wsHost}"` : ''}`
+  }
+
+  if (type === 'tuic' || protocol === 'tuic') {
+    const uuid = client?.uuid || ''
+    const password = client?.password || ''
+    const sni = streamSettings.tlsSettings?.serverName || streamSettings.serverName || settings.serverName || host
+    const insecure = Boolean(streamSettings.insecure || settings.insecure || streamSettings.tlsSettings?.allowInsecure || false)
+    return `proxies:
+  - name: "${remark}"
+    type: tuic
+    server: ${host}
+    port: ${port}
+    uuid: "${uuid}"
+    password: "${password}"
+    sni: "${sni}"
+    alpn:
+      - h3
+    congestion-controller: ${settings.congestion_control || 'bbr'}
+    reduce-rtt: ${Boolean(settings.zero_rtt_handshake ?? true) ? 'true' : 'false'}
+    skip-cert-verify: ${insecure ? 'true' : 'false'}
+    udp: true`
+  }
+
   return `# No Clash configuration available for ${type}`
 }
 
@@ -381,7 +424,10 @@ export function generateSingboxJson(inbound, client, host) {
   const type = (inbound.type || '').toLowerCase()
   const protocol = (inbound.protocol || type).toLowerCase()
 
-  const isStls = type === 'shadowtls' || protocol === 'shadowtls' || settings?.plugin === 'shadow-tls' || Boolean(settings?.shadowtlsPassword)
+  const isStls =
+    type === 'shadowtls' ||
+    protocol === 'shadowtls' ||
+    ((type === 'shadowsocks' || protocol === 'shadowsocks') && (settings?.plugin === 'shadow-tls' || Boolean(settings?.shadowtlsPassword)))
   if (isStls) {
     const stlsPassword = client?.password || settings.shadowtlsPassword || settings.password || ''
     const sni = settings.serverName || settings.sni || 'gateway.icloud.com'
@@ -423,38 +469,55 @@ export function generateSingboxJson(inbound, client, host) {
   if (type === 'vless' || protocol === 'vless') {
     const uuid = client?.uuid || ''
     const isReality = streamSettings.security === 'reality' || settings.reality || Boolean(streamSettings.realitySettings)
+    const isTls = streamSettings.security === 'tls'
     const realSettings = streamSettings.realitySettings || {}
-    const sni = streamSettings.serverName || settings.serverName || (realSettings.serverNames?.[0]) || host
+    const sni = streamSettings.tlsSettings?.serverName || streamSettings.serverName || settings.serverName || (realSettings.serverNames?.[0]) || host
     const publicKey = streamSettings.publicKey || settings.publicKey || realSettings.publicKey || ''
     const shortId = streamSettings.shortId || settings.shortId || (realSettings.shortIds?.[0]) || ''
     const flow = client?.flow || (isReality ? 'xtls-rprx-vision' : '')
+    const net = streamSettings.network || 'tcp'
+    const insecure = Boolean(streamSettings.insecure || settings.insecure || streamSettings.tlsSettings?.allowInsecure || false)
 
-    const outbounds = [
-      {
-        type: 'vless',
-        tag: remark,
-        server: host,
-        server_port: port,
-        uuid: uuid,
-        flow: flow,
-        network: 'tcp',
-        tls: {
+    const outbound = {
+      type: 'vless',
+      tag: remark,
+      server: host,
+      server_port: port,
+      uuid,
+    }
+    if (flow) outbound.flow = flow
+    if (net === 'ws') {
+      outbound.transport = {
+        type: 'ws',
+        path: streamSettings.wsSettings?.path || streamSettings.wsPath || '/',
+        headers: { Host: streamSettings.wsSettings?.headers?.Host || streamSettings.wsHost || host },
+      }
+    } else if (net === 'grpc') {
+      outbound.transport = {
+        type: 'grpc',
+        service_name: streamSettings.grpcSettings?.serviceName || streamSettings.grpcServiceName || '',
+      }
+    }
+    if (isReality || isTls) {
+      outbound.tls = {
+        enabled: true,
+        server_name: sni,
+        insecure,
+      }
+      if (isReality) {
+        outbound.tls.reality = {
           enabled: true,
-          server_name: sni,
-          reality: isReality ? {
-            enabled: true,
-            public_key: publicKey,
-            short_id: shortId,
-          } : undefined,
-          utls: {
-            enabled: true,
-            fingerprint: 'chrome',
-          },
-        },
-      },
-    ]
+          public_key: publicKey,
+          short_id: shortId,
+        }
+        outbound.tls.utls = {
+          enabled: true,
+          fingerprint: streamSettings.fingerprint || 'chrome',
+        }
+      }
+    }
 
-    return JSON.stringify({ outbounds }, null, 2)
+    return JSON.stringify({ outbounds: [outbound] }, null, 2)
   }
 
   if (type === 'hysteria2' || protocol === 'hysteria2' || type === 'hysteria' || protocol === 'hysteria') {
@@ -542,6 +605,38 @@ export function generateSingboxJson(inbound, client, host) {
         },
       ],
     }, null, 2)
+  }
+
+  if (type === 'vmess' || protocol === 'vmess') {
+    const uuid = client?.uuid || ''
+    const isTls = streamSettings.security === 'tls'
+    const sni = isTls ? (streamSettings.tlsSettings?.serverName || streamSettings.serverName || host) : ''
+    const insecure = Boolean(streamSettings.insecure || settings.insecure || streamSettings.tlsSettings?.allowInsecure || false)
+    const net = streamSettings.network || 'ws'
+    const outbound = {
+      type: 'vmess',
+      tag: remark,
+      server: host,
+      server_port: port,
+      uuid,
+      security: 'auto',
+      alter_id: 0,
+    }
+    if (net === 'ws') {
+      outbound.transport = {
+        type: 'ws',
+        path: streamSettings.wsSettings?.path || streamSettings.wsPath || '/',
+        headers: { Host: streamSettings.wsSettings?.headers?.Host || streamSettings.wsHost || host },
+      }
+    }
+    if (isTls) {
+      outbound.tls = {
+        enabled: true,
+        server_name: sni,
+        insecure,
+      }
+    }
+    return JSON.stringify({ outbounds: [outbound] }, null, 2)
   }
 
   if (type === 'shadowsocks' || protocol === 'shadowsocks') {

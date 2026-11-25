@@ -315,6 +315,7 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    if (step !== 2) return
 
     if (security === 'reality' && ['vless', 'trojan'].includes(selectedProtocol) && !privateKey.trim()) {
       toast.error('Reality private key is required. Click "Gen Keys" first.')
@@ -354,6 +355,73 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
 
       const alpnList = alpn.split(',').map((s) => s.trim()).filter(Boolean)
 
+      const protocolSettings = (() => {
+        switch (selectedProtocol) {
+          case 'shadowtls':
+            return {
+              serverName: serverName.trim(),
+              shadowtlsPassword,
+              shadowtlsVersion,
+              ssMethod,
+              method: ssMethod,
+              ssPassword,
+              password: finalClientPass,
+            }
+          case 'shadowsocks':
+            return {
+              method: ssMethod,
+              password: finalClientPass,
+            }
+          case 'hysteria2':
+            return {
+              auth: finalClientPass,
+              password: finalClientPass,
+              serverName: serverName.trim(),
+              up_mbps: parseInt(upMbps || 100, 10),
+              down_mbps: parseInt(downMbps || 100, 10),
+              obfsPassword: finalObfs,
+              ports: finalHopPorts,
+              udpHopPorts: finalHopPorts,
+              hopInterval,
+              insecure: Boolean(insecure),
+              certMode: certPreset,
+            }
+          case 'tuic':
+            return {
+              congestion_control: tuicCongestion,
+              zero_rtt_handshake: tuicZeroRtt,
+              serverName: serverName.trim(),
+              insecure: Boolean(insecure),
+              certMode: certPreset,
+            }
+          case 'wireguard':
+            return {
+              local_address: [wgLocalAddr || '10.0.0.1/24'],
+              peer_public_key: wgPeerPubKey.trim(),
+            }
+          default:
+            return {
+              password: finalClientPass,
+              ...(effectiveSecurity === 'reality' ? {
+                reality: true,
+                serverName: serverName.trim(),
+                dest: dest.trim(),
+                privateKey: privateKey.trim(),
+                publicKey: publicKey.trim(),
+                shortId: shortId.trim(),
+                fingerprint,
+                flow: selectedProtocol === 'vless' && transport === 'tcp' ? clientFlow : '',
+              } : {}),
+              ...(effectiveSecurity === 'tls' ? {
+                tls: true,
+                serverName: serverName.trim(),
+                insecure: Boolean(insecure),
+                certMode: certPreset,
+              } : {}),
+            }
+        }
+      })()
+
       const payload = {
         engine,
         type: selectedProtocol,
@@ -362,52 +430,38 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
         remark: remark || `${engine}-${selectedProtocol}-${port}`,
         total_bytes_limit: bytesLimit,
         expiry_time: expiryEpoch,
-        settings: {
-          method: ssMethod,
-          ssMethod,
-          ssPassword,
-          shadowtlsPassword,
-          password: finalClientPass,
-          serverName: serverName.trim(),
-          shadowtlsVersion,
-          up_mbps: parseInt(upMbps || 100, 10),
-          down_mbps: parseInt(downMbps || 100, 10),
-          obfsPassword: finalObfs,
-          ports: finalHopPorts,
-          udpHopPorts: finalHopPorts,
-          hopInterval,
-          congestion_control: tuicCongestion,
-          zero_rtt_handshake: tuicZeroRtt,
-          ...(selectedProtocol === 'wireguard' ? {
-            local_address: [wgLocalAddr || '10.0.0.1/24'],
-            peer_public_key: wgPeerPubKey.trim(),
-          } : {}),
-          dest: dest.trim(),
-          privateKey: privateKey.trim(),
-          publicKey: publicKey.trim(),
-          shortId: shortId.trim(),
-          fingerprint,
-          ...(isTlsProtocol ? { insecure: Boolean(insecure), certMode: certPreset } : {}),
-        },
+        settings: protocolSettings,
         stream_settings: {
           network: effectiveNetwork,
           security: effectiveSecurity,
-          serverName: serverName.trim(),
-          dest: dest.trim(),
-          privateKey: privateKey.trim(),
-          publicKey: publicKey.trim(),
-          shortId: shortId.trim(),
-          fingerprint,
-          alpn: alpnList.length > 0 ? alpnList : (selectedProtocol === 'hysteria2' || selectedProtocol === 'tuic' ? ['h3'] : ['h2', 'http/1.1']),
-          wsPath,
-          wsHost,
-          grpcServiceName,
-          obfsPassword: finalObfs,
-          ports: finalHopPorts,
-          udpHopPorts: finalHopPorts,
-          hopInterval,
-          ...certPayload,
-          ...(isTlsProtocol ? { insecure: Boolean(insecure), certMode: certPreset } : {}),
+          ...(effectiveSecurity !== 'none' ? { serverName: serverName.trim() } : {}),
+          ...(effectiveSecurity === 'reality' ? {
+            dest: dest.trim(),
+            privateKey: privateKey.trim(),
+            publicKey: publicKey.trim(),
+            shortId: shortId.trim(),
+            fingerprint,
+          } : {}),
+          ...(effectiveNetwork === 'ws' || effectiveNetwork === 'httpupgrade' ? { wsPath, wsHost } : {}),
+          ...(effectiveNetwork === 'grpc' ? { grpcServiceName } : {}),
+          ...(selectedProtocol === 'hysteria2' ? {
+            obfsPassword: finalObfs,
+            ports: finalHopPorts,
+            udpHopPorts: finalHopPorts,
+            hopInterval,
+          } : {}),
+          ...(isTlsProtocol ? {
+            alpn: alpnList.length > 0 ? alpnList : (selectedProtocol === 'hysteria2' || selectedProtocol === 'tuic' ? ['h3'] : ['h2', 'http/1.1']),
+            ...certPayload,
+            insecure: Boolean(insecure),
+            certMode: certPreset,
+            tlsSettings: {
+              alpn: alpnList.length > 0 ? alpnList : (selectedProtocol === 'hysteria2' || selectedProtocol === 'tuic' ? ['h3'] : ['h2', 'http/1.1']),
+              serverName: serverName.trim(),
+              allowInsecure: Boolean(insecure),
+              certificates: [certPayload],
+            },
+          } : {}),
           sniffing,
           ...(selectedProtocol === 'hysteria2' && finalObfs ? {
             finalmask: {
@@ -417,14 +471,6 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
                   settings: { password: finalObfs },
                 },
               ],
-            },
-          } : {}),
-          ...(isTlsProtocol ? {
-            tlsSettings: {
-              alpn: alpnList.length > 0 ? alpnList : (selectedProtocol === 'hysteria2' || selectedProtocol === 'tuic' ? ['h3'] : ['h2', 'http/1.1']),
-              serverName: serverName.trim(),
-              allowInsecure: Boolean(insecure),
-              certificates: [certPayload],
             },
           } : {}),
         },
@@ -1423,8 +1469,9 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
         {/* Modal Footer */}
         <div className="pt-4 border-t border-[#2d3148] flex items-center justify-between">
           {step === 1 ? (
-            <>
+            <React.Fragment key="footer-step-1">
               <button
+                key="cancel-btn"
                 type="button"
                 onClick={onClose}
                 className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition"
@@ -1432,19 +1479,28 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
                 Cancel
               </button>
               <button
+                key="continue-step-btn"
                 type="button"
-                onClick={() => setStep(2)}
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setStep(2)
+                }}
                 className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium transition flex items-center space-x-1.5 shadow-lg shadow-indigo-600/20"
               >
                 <span>Continue to Parameters</span>
                 <ChevronRight className="w-4 h-4" />
               </button>
-            </>
+            </React.Fragment>
           ) : (
-            <>
+            <React.Fragment key="footer-step-2">
               <button
+                key="back-step-btn"
                 type="button"
-                onClick={() => setStep(1)}
+                onClick={(e) => {
+                  e.preventDefault()
+                  setStep(1)
+                }}
                 className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition flex items-center space-x-1.5"
               >
                 <ChevronLeft className="w-4 h-4" />
@@ -1452,6 +1508,7 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
               </button>
 
               <button
+                key="submit-inbound-btn"
                 type="submit"
                 form="inbound-form"
                 disabled={loading}
@@ -1460,7 +1517,7 @@ export default function AddInboundModal({ isOpen, onClose, onSuccess, prefillSni
                 {loading && <Spinner size="xs" />}
                 <span>Create & Deploy Inbound</span>
               </button>
-            </>
+            </React.Fragment>
           )}
         </div>
       </div>
