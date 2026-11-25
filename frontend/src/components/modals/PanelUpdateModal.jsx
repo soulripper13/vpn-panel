@@ -206,7 +206,7 @@ export default function PanelUpdateModal({ isOpen, onClose, panelInfo, onFinishe
               <p className="text-xs text-slate-400">
                 Updating from{' '}
                 <span className="font-mono text-slate-300">
-                  v{panelInfo?.currentVersion || '1.2.0'}
+                  v{panelInfo?.currentVersion || (typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.5.2')}
                 </span>{' '}
                 to{' '}
                 <span className="font-mono text-indigo-300 font-semibold">

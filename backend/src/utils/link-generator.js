@@ -186,7 +186,7 @@ function generateClientLink(inbound, client, host) {
       params.set('security', 'none');
     }
 
-    if (streamSettings.network === 'ws') {
+    if (streamSettings.network === 'ws' || streamSettings.network === 'httpupgrade' || streamSettings.network === 'splithttp') {
       params.set('path', streamSettings.wsSettings?.path || streamSettings.wsPath || '/');
       params.set('host', streamSettings.wsSettings?.headers?.Host || streamSettings.wsHost || host);
     } else if (streamSettings.network === 'grpc') {
@@ -233,7 +233,7 @@ function generateClientLink(inbound, client, host) {
       params.set('allowInsecure', '1');
     }
 
-    if (streamSettings.network === 'ws') {
+    if (streamSettings.network === 'ws' || streamSettings.network === 'httpupgrade' || streamSettings.network === 'splithttp') {
       params.set('path', streamSettings.wsSettings?.path || streamSettings.wsPath || '/');
       params.set('host', streamSettings.wsSettings?.headers?.Host || streamSettings.wsHost || host);
     } else if (streamSettings.network === 'grpc') {
@@ -273,7 +273,10 @@ function generateClientLink(inbound, client, host) {
       params.set('sni', streamSettings.serverName || settings.serverName);
     }
     params.set('alpn', 'h3');
-    return `tuic://${uuid}:${password}@${host}:${port}?${params.toString()}#${urlEncode(remark)}`;
+    if (streamSettings.insecure || settings.insecure || streamSettings.tlsSettings?.allowInsecure) {
+      params.set('allow_insecure', '1');
+    }
+    return `tuic://${uuid}:${encodeURIComponent(password)}@${host}:${port}?${params.toString()}#${urlEncode(remark)}`;
   }
 
   // Fallback generic
@@ -328,16 +331,17 @@ function generateClashProxy(inbound, client, host) {
     const flow = client.flow || (isReality ? 'xtls-rprx-vision' : '');
 
     if (isReality) {
+      const net = streamSettings.network || 'tcp';
       proxyObj = {
         name: remark,
         type: 'vless',
         server: host,
         port,
         uuid,
-        network: 'tcp',
+        network: net,
         tls: true,
         udp: true,
-        flow,
+        ...(flow && net === 'tcp' ? { flow } : {}),
         servername: sni,
         'reality-opts': {
           'public-key': publicKey,
@@ -345,6 +349,11 @@ function generateClashProxy(inbound, client, host) {
         },
         'client-fingerprint': 'chrome',
       };
+      if (net === 'grpc') {
+        proxyObj['grpc-opts'] = {
+          'grpc-service-name': streamSettings.grpcSettings?.serviceName || streamSettings.grpcServiceName || '',
+        };
+      }
     } else {
       const net = streamSettings.network || 'tcp';
       const isTls = streamSettings.security === 'tls' || settings.tls || Boolean(streamSettings.tlsSettings);
@@ -469,7 +478,9 @@ function generateClashProxy(inbound, client, host) {
     if (isTls) {
       proxyObj.tls = true;
       proxyObj.servername = sni;
-      proxyObj['skip-cert-verify'] = Boolean(streamSettings.tlsSettings?.allowInsecure || false);
+      proxyObj['skip-cert-verify'] = Boolean(
+        streamSettings.insecure || settings.insecure || streamSettings.tlsSettings?.allowInsecure || false
+      );
     }
     if (net === 'ws') {
       proxyObj.network = 'ws';
@@ -484,6 +495,30 @@ function generateClashProxy(inbound, client, host) {
         'grpc-service-name': serviceName,
       };
     }
+  }
+
+  // TUIC
+  else if (type === 'tuic' || protocol === 'tuic') {
+    const uuid = client.uuid || '';
+    const password = client.password || '';
+    const sni = streamSettings.tlsSettings?.serverName || streamSettings.serverName || settings.serverName || host;
+    const insecure = Boolean(
+      streamSettings.insecure || settings.insecure || streamSettings.tlsSettings?.allowInsecure || false
+    );
+    proxyObj = {
+      name: remark,
+      type: 'tuic',
+      server: host,
+      port,
+      uuid,
+      password,
+      sni,
+      alpn: ['h3'],
+      'congestion-controller': settings.congestion_control || 'bbr',
+      'reduce-rtt': Boolean(settings.zero_rtt_handshake ?? true),
+      'skip-cert-verify': insecure,
+      udp: true,
+    };
   }
 
   if (!proxyObj) return null;
@@ -749,6 +784,129 @@ function generateSingboxConfig(inbound, client, host) {
     ];
 
     return JSON.stringify({ outbounds }, null, 2);
+  }
+
+  // TUIC
+  if (type === 'tuic' || protocol === 'tuic') {
+    const uuid = client.uuid || '';
+    const password = client.password || '';
+    const sni = streamSettings.tlsSettings?.serverName || streamSettings.serverName || settings.serverName || host;
+    const insecure = Boolean(
+      streamSettings.insecure || settings.insecure || streamSettings.tlsSettings?.allowInsecure || false
+    );
+    return JSON.stringify({
+      outbounds: [
+        {
+          type: 'tuic',
+          tag: remark,
+          server: host,
+          server_port: port,
+          uuid,
+          password,
+          congestion_control: settings.congestion_control || 'bbr',
+          zero_rtt_handshake: Boolean(settings.zero_rtt_handshake ?? true),
+          tls: {
+            enabled: true,
+            server_name: sni,
+            alpn: ['h3'],
+            insecure,
+          },
+        },
+      ],
+    }, null, 2);
+  }
+
+  // Trojan
+  if (type === 'trojan' || protocol === 'trojan') {
+    const password = client.password || settings.password || '';
+    const sni = streamSettings.tlsSettings?.serverName || streamSettings.serverName || settings.serverName || host;
+    const insecure = Boolean(
+      streamSettings.insecure || settings.insecure || streamSettings.tlsSettings?.allowInsecure || false
+    );
+    const net = streamSettings.network || 'tcp';
+    const transport = net === 'ws'
+      ? {
+          type: 'ws',
+          path: streamSettings.wsSettings?.path || streamSettings.wsPath || '/',
+          headers: (streamSettings.wsSettings?.headers?.Host || streamSettings.wsHost)
+            ? { Host: streamSettings.wsSettings?.headers?.Host || streamSettings.wsHost }
+            : undefined,
+        }
+      : (net === 'grpc'
+          ? { type: 'grpc', service_name: streamSettings.grpcSettings?.serviceName || streamSettings.grpcServiceName || 'grpc' }
+          : undefined);
+    return JSON.stringify({
+      outbounds: [
+        {
+          type: 'trojan',
+          tag: remark,
+          server: host,
+          server_port: port,
+          password,
+          ...(transport ? { transport } : {}),
+          tls: {
+            enabled: true,
+            server_name: sni,
+            insecure,
+          },
+        },
+      ],
+    }, null, 2);
+  }
+
+  // VMess
+  if (type === 'vmess' || protocol === 'vmess') {
+    const uuid = client.uuid || '';
+    const isTls = streamSettings.security === 'tls';
+    const sni = streamSettings.tlsSettings?.serverName || streamSettings.serverName || host;
+    const insecure = Boolean(
+      streamSettings.insecure || settings.insecure || streamSettings.tlsSettings?.allowInsecure || false
+    );
+    const net = streamSettings.network || 'ws';
+    const transport = net === 'ws'
+      ? {
+          type: 'ws',
+          path: streamSettings.wsSettings?.path || streamSettings.wsPath || '/',
+          headers: (streamSettings.wsSettings?.headers?.Host || streamSettings.wsHost)
+            ? { Host: streamSettings.wsSettings?.headers?.Host || streamSettings.wsHost }
+            : undefined,
+        }
+      : (net === 'grpc'
+          ? { type: 'grpc', service_name: streamSettings.grpcSettings?.serviceName || streamSettings.grpcServiceName || 'grpc' }
+          : undefined);
+    return JSON.stringify({
+      outbounds: [
+        {
+          type: 'vmess',
+          tag: remark,
+          server: host,
+          server_port: port,
+          uuid,
+          security: 'auto',
+          alter_id: 0,
+          ...(transport ? { transport } : {}),
+          ...(isTls ? { tls: { enabled: true, server_name: sni, insecure } } : {}),
+        },
+      ],
+    }, null, 2);
+  }
+
+  // Shadowsocks
+  if (type === 'shadowsocks' || protocol === 'shadowsocks') {
+    const method = settings.method || 'aes-128-gcm';
+    const password = client.password || settings.password || '';
+    return JSON.stringify({
+      outbounds: [
+        {
+          type: 'shadowsocks',
+          tag: remark,
+          server: host,
+          server_port: port,
+          method,
+          password,
+        },
+      ],
+    }, null, 2);
   }
 
   return JSON.stringify({

@@ -38,7 +38,7 @@ export default function Settings() {
     cert_fullchain: '',
     cert_privkey: '',
     singbox_bin: '/usr/bin/sing-box',
-    xray_bin: '/usr/local/x-ui/bin/xray-linux-amd64',
+    xray_bin: '/usr/local/bin/xray',
   })
 
   // Binary & Panel updates state
@@ -346,13 +346,13 @@ export default function Settings() {
                 <div className="flex justify-between">
                   <span className="text-slate-500">Current:</span>
                   <span className="text-slate-200">
-                    v{updates?.panel?.currentVersion || '1.2.0'}
+                    v{updates?.panel?.currentVersion || (typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.5.2')}
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Latest Release:</span>
                   <span className="text-indigo-300 font-semibold">
-                    v{updates?.panel?.latestVersion || '1.2.0'}
+                    v{updates?.panel?.latestVersion || (typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.5.2')}
                   </span>
                 </div>
                 {(updates?.panel?.releaseName || updates?.panel?.releaseNotes) && (

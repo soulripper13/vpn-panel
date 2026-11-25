@@ -71,9 +71,9 @@ function detectXrayBin() {
 }
 function detectXrayConfig() {
   if (process.env.XRAY_CONFIG) return process.env.XRAY_CONFIG;
-  if (fs.existsSync('/usr/local/x-ui/bin/config.json')) return '/usr/local/x-ui/bin/config.json';
   if (fs.existsSync('/etc/xray/config.json')) return '/etc/xray/config.json';
-  return '/usr/local/x-ui/bin/config.json';
+  if (fs.existsSync('/usr/local/x-ui/bin/config.json')) return '/usr/local/x-ui/bin/config.json';
+  return '/etc/xray/config.json';
 }
 const XRAY_BIN        = detectXrayBin();
 const XRAY_CONFIG     = detectXrayConfig();

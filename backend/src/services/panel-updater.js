@@ -649,8 +649,8 @@ class PanelUpdaterService {
         ['public', stagedRootPublic],
         ['deploy/panel-update-watchdog.js', watchdogSource],
       ];
-      if (fs.existsSync(path.join(sourceDir, 'VERSION'))) {
-        replacements.push(['VERSION', path.join(sourceDir, 'VERSION')]);
+      if (fs.existsSync(path.join(extractedRoot, 'VERSION'))) {
+        replacements.push(['VERSION', path.join(extractedRoot, 'VERSION')]);
       }
       transaction = {
         updateId,

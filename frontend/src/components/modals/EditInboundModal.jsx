@@ -45,6 +45,7 @@ export default function EditInboundModal({ isOpen, onClose, inbound, onSuccess }
   const [transport, setTransport] = useState('tcp')
   const [wsPath, setWsPath] = useState('/')
   const [wsHost, setWsHost] = useState('')
+  const [grpcServiceName, setGrpcServiceName] = useState('grpc')
 
   // 3. Security
   const [security, setSecurity] = useState('none')
@@ -82,8 +83,9 @@ export default function EditInboundModal({ isOpen, onClose, inbound, onSuccess }
   const [hy2UpMbps, setHy2UpMbps] = useState(100)
   const [hy2DownMbps, setHy2DownMbps] = useState(100)
 
-  // Trojan / VMess / Shadowsocks Credentials
+  // Trojan / VMess / Shadowsocks / TUIC
   const [generalPassword, setGeneralPassword] = useState('')
+  const [tuicCongestion, setTuicCongestion] = useState('bbr')
 
   useEffect(() => {
     if (!isOpen || !inbound) return
@@ -104,6 +106,7 @@ export default function EditInboundModal({ isOpen, onClose, inbound, onSuccess }
     setTransport(initStream.network || 'tcp')
     setWsPath(initStream.wsSettings?.path || initStream.wsPath || '/')
     setWsHost(initStream.wsSettings?.headers?.Host || initStream.wsHost || '')
+    setGrpcServiceName(initStream.grpcSettings?.serviceName || initStream.grpcServiceName || 'grpc')
 
     setSecurity(isRealityInit ? 'reality' : (isTlsInit ? 'tls' : 'none'))
 
@@ -146,6 +149,7 @@ export default function EditInboundModal({ isOpen, onClose, inbound, onSuccess }
     setHy2DownMbps(initSet.down_mbps || initStream.down_mbps || 100)
 
     setGeneralPassword(initSet.password || '')
+    setTuicCongestion(initSet.congestion_control || 'bbr')
   }, [isOpen, inbound])
 
   if (!isOpen || !inbound) return null
@@ -203,6 +207,7 @@ export default function EditInboundModal({ isOpen, onClose, inbound, onSuccess }
         payload.stream_settings.network = transport
         payload.stream_settings.wsPath = wsPath
         payload.stream_settings.wsHost = wsHost
+        payload.stream_settings.grpcServiceName = grpcServiceName
         payload.stream_settings.security = protocol === 'trojan' && security === 'none' ? 'tls' : security
 
         if (payload.stream_settings.security === 'reality') {
@@ -218,7 +223,9 @@ export default function EditInboundModal({ isOpen, onClose, inbound, onSuccess }
             publicKey: realityPublicKey,
             shortIds: realityShortId ? [realityShortId] : [''],
           }
-          payload.settings.flow = realityFlow
+          if (protocol === 'vless') {
+            payload.settings.flow = realityFlow
+          }
         } else if (payload.stream_settings.security === 'tls') {
           const certVals = certMode === 'selfsigned'
             ? { certificateFile: '', keyFile: '' }
@@ -293,6 +300,31 @@ export default function EditInboundModal({ isOpen, onClose, inbound, onSuccess }
         payload.settings.password = generalPassword
         if (protocol === 'shadowsocks') {
           payload.settings.method = ssMethod
+        }
+      }
+
+      // 5. TUIC
+      if (protocol === 'tuic') {
+        const certVals = certMode === 'selfsigned'
+          ? { certificateFile: '', keyFile: '' }
+          : { certificateFile: certificateFile.trim(), keyFile: keyFile.trim() }
+
+        payload.settings.congestion_control = tuicCongestion
+        payload.settings.serverName = tlsSni.trim()
+        payload.settings.insecure = Boolean(tlsInsecure)
+        payload.settings.certMode = certMode
+        payload.stream_settings.security = 'tls'
+        payload.stream_settings.serverName = tlsSni.trim()
+        payload.stream_settings.insecure = Boolean(tlsInsecure)
+        payload.stream_settings.certMode = certMode
+        payload.stream_settings.certificateFile = certVals.certificateFile
+        payload.stream_settings.keyFile = certVals.keyFile
+        payload.stream_settings.tlsSettings = {
+          ...(initialStream.tlsSettings || {}),
+          alpn: ['h3'],
+          serverName: tlsSni.trim(),
+          allowInsecure: Boolean(tlsInsecure),
+          certificates: [certVals],
         }
       }
 
@@ -540,6 +572,18 @@ export default function EditInboundModal({ isOpen, onClose, inbound, onSuccess }
                       className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
                     />
                   </div>
+                </div>
+              )}
+
+              {transport === 'grpc' && (
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1">gRPC Service Name</label>
+                  <input
+                    type="text"
+                    value={grpcServiceName}
+                    onChange={(e) => setGrpcServiceName(e.target.value)}
+                    className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
+                  />
                 </div>
               )}
 
@@ -896,6 +940,88 @@ export default function EditInboundModal({ isOpen, onClose, inbound, onSuccess }
                   />
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* 5. TUIC */}
+          {protocol === 'tuic' && (
+            <div className="bg-[#14161f] border border-indigo-500/30 rounded-xl p-4 space-y-3">
+              <h4 className="text-xs font-semibold text-indigo-300 uppercase tracking-wider">TUIC v5 Settings</h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1">Congestion Control</label>
+                  <select
+                    value={tuicCongestion}
+                    onChange={(e) => setTuicCongestion(e.target.value)}
+                    className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="bbr">BBR</option>
+                    <option value="cubic">CUBIC</option>
+                    <option value="new_reno">New Reno</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1">TLS SNI Domain</label>
+                  <input
+                    type="text"
+                    value={tlsSni}
+                    onChange={(e) => setTlsSni(e.target.value)}
+                    className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1">Certificate Mode</label>
+                  <select
+                    value={certMode}
+                    onChange={(e) => {
+                      const mode = e.target.value
+                      setCertMode(mode)
+                      if (mode === 'selfsigned') setTlsInsecure(true)
+                    }}
+                    className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="selfsigned">Self-Signed (Auto)</option>
+                    <option value="settings">Panel Settings Cert</option>
+                    <option value="custom">Custom Paths</option>
+                  </select>
+                </div>
+                <div className="flex items-center space-x-2 pt-5">
+                  <input
+                    type="checkbox"
+                    id="editTuicInsecure"
+                    checked={tlsInsecure}
+                    onChange={(e) => setTlsInsecure(e.target.checked)}
+                    className="rounded bg-[#1a1d27] border-[#2d3148] text-indigo-600 focus:ring-0"
+                  />
+                  <label htmlFor="editTuicInsecure" className="text-xs text-slate-300">
+                    Skip TLS Verification (insecure)
+                  </label>
+                </div>
+              </div>
+              {certMode !== 'selfsigned' && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-1">Fullchain Cert Path</label>
+                    <input
+                      type="text"
+                      value={certificateFile}
+                      onChange={(e) => setCertificateFile(e.target.value)}
+                      className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-1">Private Key Path</label>
+                    <input
+                      type="text"
+                      value={keyFile}
+                      onChange={(e) => setKeyFile(e.target.value)}
+                      className="w-full bg-[#1a1d27] border border-[#2d3148] rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

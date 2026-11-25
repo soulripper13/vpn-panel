@@ -391,6 +391,15 @@ export function generateSingboxJson(inbound, client, host) {
 
     const outbounds = [
       {
+        type: 'shadowsocks',
+        tag: `${remark}-ss`,
+        server: host,
+        server_port: port,
+        method: ssMethod,
+        password: ssPassword,
+        detour: `${remark}-shadowtls`,
+      },
+      {
         type: 'shadowtls',
         tag: `${remark}-shadowtls`,
         server: host,
@@ -405,15 +414,6 @@ export function generateSingboxJson(inbound, client, host) {
             fingerprint: 'chrome',
           },
         },
-        detour: `${remark}-ss`,
-      },
-      {
-        type: 'shadowsocks',
-        tag: `${remark}-ss`,
-        server: host,
-        server_port: port,
-        method: ssMethod,
-        password: ssPassword,
       },
     ]
 
@@ -489,6 +489,76 @@ export function generateSingboxJson(inbound, client, host) {
     ]
 
     return JSON.stringify({ outbounds }, null, 2)
+  }
+
+  if (type === 'tuic' || protocol === 'tuic') {
+    const uuid = client?.uuid || ''
+    const password = client?.password || ''
+    const sni = streamSettings.tlsSettings?.serverName || streamSettings.serverName || settings.serverName || host
+    const insecure = Boolean(
+      streamSettings.insecure || settings.insecure || streamSettings.tlsSettings?.allowInsecure || false
+    )
+    return JSON.stringify({
+      outbounds: [
+        {
+          type: 'tuic',
+          tag: remark,
+          server: host,
+          server_port: port,
+          uuid,
+          password,
+          congestion_control: settings.congestion_control || 'bbr',
+          zero_rtt_handshake: Boolean(settings.zero_rtt_handshake ?? true),
+          tls: {
+            enabled: true,
+            server_name: sni,
+            alpn: ['h3'],
+            insecure,
+          },
+        },
+      ],
+    }, null, 2)
+  }
+
+  if (type === 'trojan' || protocol === 'trojan') {
+    const password = client?.password || settings.password || ''
+    const sni = streamSettings.tlsSettings?.serverName || streamSettings.serverName || settings.serverName || host
+    const insecure = Boolean(
+      streamSettings.insecure || settings.insecure || streamSettings.tlsSettings?.allowInsecure || false
+    )
+    return JSON.stringify({
+      outbounds: [
+        {
+          type: 'trojan',
+          tag: remark,
+          server: host,
+          server_port: port,
+          password,
+          tls: {
+            enabled: true,
+            server_name: sni,
+            insecure,
+          },
+        },
+      ],
+    }, null, 2)
+  }
+
+  if (type === 'shadowsocks' || protocol === 'shadowsocks') {
+    const method = settings.method || 'aes-128-gcm'
+    const password = client?.password || settings.password || ''
+    return JSON.stringify({
+      outbounds: [
+        {
+          type: 'shadowsocks',
+          tag: remark,
+          server: host,
+          server_port: port,
+          method,
+          password,
+        },
+      ],
+    }, null, 2)
   }
 
   return JSON.stringify({

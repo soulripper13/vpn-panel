@@ -105,7 +105,7 @@ export default function Logs() {
             <span className="w-3 h-3 rounded-full bg-amber-500/80 inline-block" />
             <span className="w-3 h-3 rounded-full bg-emerald-500/80 inline-block" />
             <span className="text-xs font-mono text-slate-400 ml-3">
-              {engine === 'singbox' ? '/usr/bin/sing-box' : '/usr/local/x-ui/bin/xray-linux-amd64'}
+              {engine === 'singbox' ? 'sing-box.service' : 'xray.service'}
             </span>
           </div>
 

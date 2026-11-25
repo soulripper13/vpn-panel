@@ -322,6 +322,28 @@ test('Xray & sing-box normalize UI stream_settings for VLESS/VMess/Trojan and Wi
   assert.deepEqual(sbWg.local_address, ['10.0.0.1/24']);
 });
 
+test('TUIC & Trojan Clash/Sing-box client exports include full credentials and TLS settings', () => {
+  const tuicInb = {
+    type: 'tuic',
+    protocol: 'tuic',
+    port: 8445,
+    remark: 'TUIC-Node',
+    settings: { congestion_control: 'bbr', zero_rtt_handshake: true, serverName: 'gateway.icloud.com', insecure: true },
+    stream_settings: { security: 'tls', serverName: 'gateway.icloud.com', insecure: true },
+  };
+  const tuicClient = { uuid: '11111111-1111-1111-1111-111111111111', password: 'tuic-pass', email: 'tuic1' };
+
+  const tuicUri = generateClientLink(tuicInb, tuicClient, '1.2.3.4');
+  assert.ok(tuicUri.includes('allow_insecure=1'));
+  const tuicClash = generateClashProxy(tuicInb, tuicClient, '1.2.3.4');
+  assert.equal(tuicClash.obj.type, 'tuic');
+  assert.equal(tuicClash.obj['skip-cert-verify'], true);
+  const tuicSb = JSON.parse(generateSingboxConfig(tuicInb, tuicClient, '1.2.3.4'));
+  assert.equal(tuicSb.outbounds[0].type, 'tuic');
+  assert.equal(tuicSb.outbounds[0].uuid, tuicClient.uuid);
+  assert.equal(tuicSb.outbounds[0].tls.insecure, true);
+});
+
 test.after(() => {
   try { fs.unlinkSync(testDbPath); } catch {}
   try { fs.unlinkSync(`${testDbPath}-wal`); } catch {}

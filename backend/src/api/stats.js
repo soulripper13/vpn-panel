@@ -21,7 +21,7 @@ router.use(requireAuth);
  */
 router.get('/overview', async (req, res) => {
   try {
-    const data = await TrafficService.getSystemOverview();
+    const data = await TrafficService.getSystemOverview(req.session.user);
     return res.json({ success: true, data });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });

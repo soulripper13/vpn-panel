@@ -182,8 +182,11 @@ router.get('/qr/:token', async (req, res) => {
   try {
     const proto = req.protocol || 'http';
     const host = getServerHost(req);
+    const reqHost = req.get('host') || '';
+    const port = reqHost.includes(':') ? reqHost.split(':')[1] : '';
+    const portSuffix = port ? `:${port}` : '';
     const format = req.query.format ? `?format=${encodeURIComponent(req.query.format)}` : '?format=clash';
-    const subUrl = `${proto}://${host}/api/sub/${encodeURIComponent(token)}${format}`;
+    const subUrl = `${proto}://${host}${portSuffix}/api/sub/${encodeURIComponent(token)}${format}`;
 
     const qrBuffer = await generateQRCodeBuffer(subUrl);
     res.setHeader('Content-Type', 'image/png');

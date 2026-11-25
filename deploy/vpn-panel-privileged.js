@@ -17,13 +17,11 @@ const PUBLIC_KEY = fs.readFileSync(path.join(__dirname, 'panel-release-public-ke
 const MAX_REQUEST_BYTES = 8 * 1024 * 1024;
 const ALLOWED_ENGINES = {
   singbox: {
-    service: 'sing-box',
     binary: process.env.SINGBOX_BIN || '/usr/bin/sing-box',
     config: process.env.SINGBOX_CONFIG || '/etc/sing-box/config.json',
     service: process.env.SINGBOX_SERVICE || 'sing-box',
   },
   xray: {
-    service: 'xray',
     binary: process.env.XRAY_BIN || '/usr/local/bin/xray',
     config: process.env.XRAY_CONFIG || '/etc/xray/config.json',
     service: process.env.XRAY_SERVICE || 'xray',
